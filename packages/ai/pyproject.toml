@@ -1,0 +1,10 @@
+[project]
+name = "zyth-ai"
+version = "0.1.0"
+description = "zyth.ai - ML/AI utilities"
+requires-python = ">=3.10"
+dependencies = ["zyth-runtime"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

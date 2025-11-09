@@ -1,0 +1,13 @@
+[project]
+name = "zyth-cli"
+version = "0.1.0"
+description = "Zyth command-line tool"
+requires-python = ">=3.10"
+dependencies = ["zyth-core"]
+
+[project.scripts]
+zyth = "zyth_cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

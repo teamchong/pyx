@@ -14,6 +14,8 @@ class ZigCodeGenerator:
         self.output: List[str] = []
         self.needs_runtime = False  # Track if we need PyObject runtime
         self.needs_allocator = False  # Track if we need allocator
+        self.declared_vars: set[str] = set()  # Track declared variables
+        self.reassigned_vars: set[str] = set()  # Track variables that are reassigned
 
     def indent(self) -> str:
         """Get current indentation"""
@@ -48,16 +50,46 @@ class ZigCodeGenerator:
                 self._detect_runtime_needs(stmt)
             for stmt in node.orelse:
                 self._detect_runtime_needs(stmt)
+        elif isinstance(node, ast.While):
+            for stmt in node.body:
+                self._detect_runtime_needs(stmt)
+
+    def _detect_reassignments(self, node: ast.AST) -> None:
+        """Detect variables that are reassigned (need var instead of const)"""
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    if target.id in self.declared_vars:
+                        self.reassigned_vars.add(target.id)
+                    else:
+                        self.declared_vars.add(target.id)
+        elif isinstance(node, ast.FunctionDef):
+            for stmt in node.body:
+                self._detect_reassignments(stmt)
+        elif isinstance(node, ast.If):
+            for stmt in node.body:
+                self._detect_reassignments(stmt)
+            for stmt in node.orelse:
+                self._detect_reassignments(stmt)
+        elif isinstance(node, ast.While):
+            for stmt in node.body:
+                self._detect_reassignments(stmt)
 
     def generate(self, parsed: ParsedModule) -> str:
         """Generate Zig code from parsed module"""
         self.output = []
         self.needs_runtime = False
         self.needs_allocator = False
+        self.declared_vars = set()
+        self.reassigned_vars = set()
 
-        # First pass: detect if we need runtime
+        # First pass: detect runtime needs and variable reassignments
         for node in parsed.ast_tree.body:
             self._detect_runtime_needs(node)
+            self._detect_reassignments(node)
+
+        # Reset declared_vars for code generation phase
+        self.declared_vars = set()
 
         # Zig imports
         self.emit("const std = @import(\"std\");")
@@ -170,6 +202,18 @@ class ZigCodeGenerator:
 
         self.emit("}")
 
+    def visit_While(self, node: ast.While) -> None:
+        """Generate while loop"""
+        test_code, test_try = self.visit_expr(node.test)
+        self.emit(f"while ({test_code}) {{")
+        self.indent_level += 1
+
+        for stmt in node.body:
+            self.visit(stmt)
+
+        self.indent_level -= 1
+        self.emit("}")
+
     def visit_Return(self, node: ast.Return) -> None:
         """Generate return statement"""
         if node.value:
@@ -196,6 +240,12 @@ class ZigCodeGenerator:
         # For now, assume single target
         target = node.targets[0]
         if isinstance(target, ast.Name):
+            # Determine if this is first assignment or reassignment
+            var_keyword = "var" if target.id in self.reassigned_vars else "const"
+            is_first_assignment = target.id not in self.declared_vars
+            if is_first_assignment:
+                self.declared_vars.add(target.id)
+
             # Special handling for chained string concatenation
             if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add):
                 parts_code = []
@@ -223,7 +273,10 @@ class ZigCodeGenerator:
 
                     # Chain concat operations
                     if len(temp_vars) == 1:
-                        self.emit(f"const {target.id} = {temp_vars[0]};")
+                        if is_first_assignment:
+                            self.emit(f"{var_keyword} {target.id} = {temp_vars[0]};")
+                        else:
+                            self.emit(f"{target.id} = {temp_vars[0]};")
                     else:
                         result_var = temp_vars[0]
                         for i in range(1, len(temp_vars)):
@@ -232,18 +285,33 @@ class ZigCodeGenerator:
                             if i < len(temp_vars) - 1:  # All intermediate results need cleanup
                                 self.emit(f"defer runtime.decref({next_var}, allocator);")
                             result_var = next_var
-                        self.emit(f"const {target.id} = {result_var};")
+                        if is_first_assignment:
+                            self.emit(f"{var_keyword} {target.id} = {result_var};")
+                        else:
+                            self.emit(f"{target.id} = {result_var};")
 
-                    self.emit(f"defer runtime.decref({target.id}, allocator);")
+                    if is_first_assignment:
+                        self.emit(f"defer runtime.decref({target.id}, allocator);")
                     return
 
             # Default path
             value_code, needs_try = self.visit_expr(node.value)
-            if needs_try:
-                self.emit(f"const {target.id} = try {value_code};")
-                self.emit(f"defer runtime.decref({target.id}, allocator);")
+            if is_first_assignment:
+                if needs_try:
+                    self.emit(f"{var_keyword} {target.id} = try {value_code};")
+                    self.emit(f"defer runtime.decref({target.id}, allocator);")
+                else:
+                    # For var, need explicit type; for const, type is inferred
+                    if var_keyword == "var":
+                        self.emit(f"{var_keyword} {target.id}: i64 = {value_code};")
+                    else:
+                        self.emit(f"{var_keyword} {target.id} = {value_code};")
             else:
-                self.emit(f"const {target.id} = {value_code};")
+                # Reassignment - no var/const keyword
+                if needs_try:
+                    self.emit(f"{target.id} = try {value_code};")
+                else:
+                    self.emit(f"{target.id} = {value_code};")
 
     def visit_Expr(self, node: ast.Expr) -> None:
         """Generate expression statement"""

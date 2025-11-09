@@ -120,7 +120,9 @@ pub const PyList = struct {
     pub fn pop(obj: *PyObject, allocator: std.mem.Allocator) *PyObject {
         std.debug.assert(obj.type_id == .list);
         const data: *PyList = @ptrCast(@alignCast(obj.data));
-        const item = data.items.pop();
+        // pop() returns the last element and removes it
+        const item = data.items.items[data.items.items.len - 1];
+        _ = data.items.pop(); // Remove it from the list
         // Don't decref - we're transferring ownership to caller
         _ = allocator; // Unused but kept for consistency
         return item;

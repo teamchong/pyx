@@ -429,6 +429,11 @@ class ZigCodeGenerator:
             if isinstance(node.value, ast.Subscript):
                 self.var_types[target.id] = "pyint"
 
+            # Special handling for list.pop() (track as pyint)
+            if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
+                if node.value.func.attr == "pop":
+                    self.var_types[target.id] = "pyint"
+
             # Special handling for dict literals
             if isinstance(node.value, ast.Dict):
                 # Track this as a dict type
@@ -521,6 +526,25 @@ class ZigCodeGenerator:
             return
 
         expr_code, needs_try = self.visit_expr(node.value)
+
+        # Special handling for list.append() with primitive args
+        if expr_code.startswith("__list_append__"):
+            parts = expr_code.split("__")
+            obj_code = parts[2]
+            arg_code = parts[3]
+            arg_try = parts[4] == "True"
+
+            if not arg_try:
+                # Primitive - wrap in PyInt first
+                temp_var = f"_append_arg_{id(node)}"
+                self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {arg_code});")
+                self.emit(f"try runtime.PyList.append({obj_code}, {temp_var});")
+                self.emit(f"runtime.decref({temp_var}, allocator);")
+            else:
+                # Already PyObject
+                self.emit(f"try runtime.PyList.append({obj_code}, {arg_code});")
+            return
+
         if needs_try:
             self.emit(f"_ = try {expr_code};")
         else:
@@ -606,6 +630,18 @@ class ZigCodeGenerator:
                     return (f"runtime.PyString.upper(allocator, {obj_code})", True)
                 elif method_name == "lower":
                     return (f"runtime.PyString.lower(allocator, {obj_code})", True)
+                # Handle list methods
+                elif method_name == "append":
+                    # This will be handled in visit_Expr for statement context
+                    # Mark it with a special token so visit_Expr can detect it
+                    if args:
+                        arg_code, arg_try = args[0]
+                        return (f"__list_append__{obj_code}__{arg_code}__{arg_try}", True)
+                    raise NotImplementedError("append() requires an argument")
+                elif method_name == "pop":
+                    # pop() returns a PyObject that caller must manage
+                    # Mark as needing to track this as py object
+                    return (f"runtime.PyList.pop({obj_code}, allocator)", False)
                 else:
                     raise NotImplementedError(f"Method {method_name} not supported")
 

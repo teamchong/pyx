@@ -340,6 +340,124 @@ pub const PyString = struct {
         // Create new string
         return try create(allocator, substring);
     }
+
+    pub fn split(allocator: std.mem.Allocator, obj: *PyObject, separator: *PyObject) !*PyObject {
+        std.debug.assert(obj.type_id == .string);
+        std.debug.assert(separator.type_id == .string);
+        const data: *PyString = @ptrCast(@alignCast(obj.data));
+        const sep_data: *PyString = @ptrCast(@alignCast(separator.data));
+
+        const str = data.data;
+        const sep = sep_data.data;
+
+        // Create result list
+        const result = try PyList.create(allocator);
+
+        // Handle empty separator (split into chars)
+        if (sep.len == 0) {
+            for (str) |c| {
+                const char_str = try allocator.alloc(u8, 1);
+                char_str[0] = c;
+                const char_obj = try create(allocator, char_str);
+                try PyList.append(result, char_obj);
+            }
+            return result;
+        }
+
+        // Split by separator
+        var start: usize = 0;
+        var i: usize = 0;
+        while (i <= str.len - sep.len) {
+            if (std.mem.eql(u8, str[i..i + sep.len], sep)) {
+                // Found separator - add substring
+                const part = str[start..i];
+                const part_obj = try create(allocator, part);
+                try PyList.append(result, part_obj);
+                i += sep.len;
+                start = i;
+            } else {
+                i += 1;
+            }
+        }
+
+        // Add final part
+        const final_part = str[start..];
+        const final_obj = try create(allocator, final_part);
+        try PyList.append(result, final_obj);
+
+        return result;
+    }
+
+    pub fn strip(allocator: std.mem.Allocator, obj: *PyObject) !*PyObject {
+        std.debug.assert(obj.type_id == .string);
+        const data: *PyString = @ptrCast(@alignCast(obj.data));
+        const str = data.data;
+
+        // Find first non-whitespace
+        var start: usize = 0;
+        while (start < str.len and std.ascii.isWhitespace(str[start])) : (start += 1) {}
+
+        // Find last non-whitespace
+        var end: usize = str.len;
+        while (end > start and std.ascii.isWhitespace(str[end - 1])) : (end -= 1) {}
+
+        // Create stripped string
+        const stripped = str[start..end];
+        return try create(allocator, stripped);
+    }
+
+    pub fn replace(allocator: std.mem.Allocator, obj: *PyObject, old: *PyObject, new: *PyObject) !*PyObject {
+        std.debug.assert(obj.type_id == .string);
+        std.debug.assert(old.type_id == .string);
+        std.debug.assert(new.type_id == .string);
+        const data: *PyString = @ptrCast(@alignCast(obj.data));
+        const old_data: *PyString = @ptrCast(@alignCast(old.data));
+        const new_data: *PyString = @ptrCast(@alignCast(new.data));
+
+        const str = data.data;
+        const old_str = old_data.data;
+        const new_str = new_data.data;
+
+        // Count occurrences to allocate result
+        var count: usize = 0;
+        var i: usize = 0;
+        while (i <= str.len - old_str.len) {
+            if (std.mem.eql(u8, str[i..i + old_str.len], old_str)) {
+                count += 1;
+                i += old_str.len;
+            } else {
+                i += 1;
+            }
+        }
+
+        // If no replacements, return copy of original
+        if (count == 0) {
+            return try create(allocator, str);
+        }
+
+        // Calculate result size and allocate
+        const result_len = str.len - (count * old_str.len) + (count * new_str.len);
+        const result = try allocator.alloc(u8, result_len);
+
+        // Build result string
+        var src_idx: usize = 0;
+        var dst_idx: usize = 0;
+        while (src_idx < str.len) {
+            if (src_idx <= str.len - old_str.len and std.mem.eql(u8, str[src_idx..src_idx + old_str.len], old_str)) {
+                // Copy replacement
+                @memcpy(result[dst_idx..dst_idx + new_str.len], new_str);
+                src_idx += old_str.len;
+                dst_idx += new_str.len;
+            } else {
+                // Copy original char
+                result[dst_idx] = str[src_idx];
+                src_idx += 1;
+                dst_idx += 1;
+            }
+        }
+
+        return try create(allocator, result);
+    }
 };
 
 /// Python dict type (simplified - using StringHashMap)

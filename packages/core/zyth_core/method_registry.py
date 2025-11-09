@@ -78,10 +78,17 @@ class MethodInfo:
                 if self.wrap_primitive_args and not arg_try:
                     # This will be handled specially - return a marker
                     arg_list.append(f"__WRAP_PRIMITIVE__{arg_code}")
+                elif arg_try:
+                    # Argument needs try - wrap it
+                    arg_list.append(f"try {arg_code}")
                 else:
                     arg_list.append(arg_code)
             else:
-                arg_list.append(arg_code)
+                # Handle generic arguments
+                if arg_try:
+                    arg_list.append(f"try {arg_code}")
+                else:
+                    arg_list.append(arg_code)
 
         args_str = ", ".join(arg_list)
         call_code = f"runtime.{self.runtime_type}.{self.runtime_fn}({args_str})"
@@ -111,6 +118,30 @@ METHOD_REGISTRY: dict[str, MethodInfo] = {
         needs_allocator=True,
         return_type=ReturnType.PYOBJECT,
         arg_types=[],
+    ),
+    "split": MethodInfo(
+        name="split",
+        runtime_type="PyString",
+        runtime_fn="split",
+        needs_allocator=True,
+        return_type=ReturnType.PYOBJECT,
+        arg_types=[ArgType.PYOBJECT],  # Separator string
+    ),
+    "strip": MethodInfo(
+        name="strip",
+        runtime_type="PyString",
+        runtime_fn="strip",
+        needs_allocator=True,
+        return_type=ReturnType.PYOBJECT,
+        arg_types=[],
+    ),
+    "replace": MethodInfo(
+        name="replace",
+        runtime_type="PyString",
+        runtime_fn="replace",
+        needs_allocator=True,
+        return_type=ReturnType.PYOBJECT,
+        arg_types=[ArgType.PYOBJECT, ArgType.PYOBJECT],  # old, new
     ),
 
     # List methods

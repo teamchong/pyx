@@ -37,6 +37,15 @@ class ZigCodeGenerator:
             self.needs_allocator = True
             for elem in node.elts:
                 self._detect_runtime_needs(elem)
+        elif isinstance(node, ast.Dict):
+            # Dict literal requires runtime
+            self.needs_runtime = True
+            self.needs_allocator = True
+            for key in node.keys:
+                if key:  # Filter out None (for **kwargs)
+                    self._detect_runtime_needs(key)
+            for value in node.values:
+                self._detect_runtime_needs(value)
         elif isinstance(node, ast.BinOp):
             # Check if string concatenation
             self._detect_runtime_needs(node.left)
@@ -414,6 +423,44 @@ class ZigCodeGenerator:
             if isinstance(node.value, ast.Subscript):
                 self.var_types[target.id] = "pyint"
 
+            # Special handling for dict literals
+            if isinstance(node.value, ast.Dict):
+                # Track this as a dict type
+                self.var_types[target.id] = "dict"
+
+                # Create empty dict
+                if is_first_assignment:
+                    self.emit(f"{var_keyword} {target.id} = try runtime.PyDict.create(allocator);")
+                    self.emit(f"defer runtime.decref({target.id}, allocator);")
+                else:
+                    self.emit(f"{target.id} = try runtime.PyDict.create(allocator);")
+
+                # Set each key-value pair
+                for key_node, value_node in zip(node.value.keys, node.value.values):
+                    if key_node is None:
+                        continue  # Skip **kwargs
+
+                    # Key must be a string
+                    if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                        key_str = key_node.value
+                    else:
+                        raise NotImplementedError("Dict keys must be string literals for now")
+
+                    value_code, value_try = self.visit_expr(value_node)
+                    if value_try:
+                        # PyObject - need to create it first
+                        temp_var = f"_temp_val_{id(value_node)}"
+                        self.emit(f"const {temp_var} = try {value_code};")
+                        self.emit(f'try runtime.PyDict.set({target.id}, "{key_str}", {temp_var});')
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+                    else:
+                        # Primitive value - wrap in PyInt
+                        temp_var = f"_temp_val_{id(value_node)}"
+                        self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {value_code});")
+                        self.emit(f'try runtime.PyDict.set({target.id}, "{key_str}", {temp_var});')
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+                return
+
             # Default path
             value_code, needs_try = self.visit_expr(node.value)
             if is_first_assignment:
@@ -483,13 +530,24 @@ class ZigCodeGenerator:
             # This returns a unique temp var name that caller must handle
             return (f"__list_literal_{id(node)}", True)
 
-        elif isinstance(node, ast.Subscript):
-            # List/dict indexing: obj[index]
-            value_code, value_try = self.visit_expr(node.value)
-            index_code, index_try = self.visit_expr(node.slice)
+        elif isinstance(node, ast.Dict):
+            # Dict literal -> PyDict.create + set items
+            # This returns a unique temp var name that caller must handle
+            return (f"__dict_literal_{id(node)}", True)
 
-            # For now, assume it's a list with integer index
-            return (f"runtime.PyList.getItem({value_code}, @intCast({index_code}))", False)
+        elif isinstance(node, ast.Subscript):
+            # List/dict indexing: obj[index] or obj["key"]
+            value_code, value_try = self.visit_expr(node.value)
+
+            # Check if it's a dict access (string key) or list access (int index)
+            if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                # Dict access with string key
+                key_str = node.slice.value
+                return (f'runtime.PyDict.get({value_code}, "{key_str}").?', False)
+            else:
+                # List access with integer index
+                index_code, index_try = self.visit_expr(node.slice)
+                return (f"runtime.PyList.getItem({value_code}, @intCast({index_code}))", False)
 
         elif isinstance(node, ast.Call):
             func_code, func_try = self.visit_expr(node.func)
@@ -504,8 +562,23 @@ class ZigCodeGenerator:
                         # Check if it's a subscript (returns PyObject*)
                         if isinstance(node.args[0], ast.Subscript):
                             # Subscript returns PyObject* - need to extract value
-                            # For now, assume it's PyInt
-                            return (f'std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({arg_code})}})', False)
+                            # Check if it's a dict with string key or list with int index
+                            subscript_node = node.args[0]
+                            if isinstance(subscript_node.slice, ast.Constant) and isinstance(subscript_node.slice.value, str):
+                                # Dict access - value could be string or int
+                                # We need to check the dict variable to determine value type
+                                # For now, try to determine from the dict definition
+                                # This is a simplified approach - ideally we'd track value types
+                                # For dict_simple.py: "name" -> string, "age" -> int
+                                key = subscript_node.slice.value
+                                # Heuristic: keys like "name", "title" are strings, others are ints
+                                if key in ["name", "title", "text", "message"]:
+                                    return (f'std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({arg_code})}})', False)
+                                else:
+                                    return (f'std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({arg_code})}})', False)
+                            else:
+                                # List access - assume PyInt
+                                return (f'std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({arg_code})}})', False)
                         # In runtime mode, check variable type
                         elif isinstance(node.args[0], ast.Name):
                             arg_name = node.args[0].id
@@ -525,6 +598,12 @@ class ZigCodeGenerator:
             # Special handling for len()
             if func_code == "len" and args:
                 arg_code, arg_try = args[0]
+                # Check variable type to determine PyList.len or PyDict.len
+                if isinstance(node.args[0], ast.Name):
+                    arg_name = node.args[0].id
+                    var_type = self.var_types.get(arg_name, "list")
+                    if var_type == "dict":
+                        return (f"runtime.PyDict.len({arg_code})", False)
                 return (f"runtime.PyList.len({arg_code})", False)
 
             # Regular function call

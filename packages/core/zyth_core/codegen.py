@@ -199,25 +199,27 @@ class ZigCodeGenerator:
             # Special handling for chained string concatenation
             if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add):
                 parts_code = []
-                needs_runtime = False
+                uses_runtime = False
                 for part in self._flatten_binop_chain(node.value, ast.Add):
                     part_code, part_try = self.visit_expr(part)
                     parts_code.append((part_code, part_try))
                     if part_try:
-                        needs_runtime = True
+                        uses_runtime = True
 
-                if needs_runtime:
+                # If we're in runtime mode (strings), use PyObject concat
+                if self.needs_runtime or uses_runtime:
                     # Generate temp variables for each part
                     temp_vars = []
                     for i, (part_code, part_try) in enumerate(parts_code):
-                        temp_var = f"_temp_{target.id}_{i}"
                         if part_try:
+                            # Expression that creates PyObject (e.g., string literal)
+                            temp_var = f"_temp_{target.id}_{i}"
                             self.emit(f"const {temp_var} = try {part_code};")
                             self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                            temp_vars.append(temp_var)
                         else:
-                            # Wrap non-PyObject in PyString if mixing types
-                            self.emit(f"const {temp_var} = {part_code};")
-                        temp_vars.append(temp_var)
+                            # Variable reference - use directly (already a PyObject in runtime mode)
+                            temp_vars.append(part_code)
 
                     # Chain concat operations
                     if len(temp_vars) == 1:

@@ -978,6 +978,75 @@ class ZigCodeGenerator:
 
                 self.indent_level -= 1
                 self.emit("}")
+            elif node.iter.func.id == "zip":
+                # zip(iterables...) - parallel iteration
+                # Target must be a tuple with same number of elements as zip arguments
+                if not isinstance(node.target, ast.Tuple):
+                    raise NotImplementedError("zip() requires tuple unpacking: for a, b in zip(...)")
+
+                if len(node.target.elts) != len(node.iter.args):
+                    raise NotImplementedError(f"zip() target must have {len(node.iter.args)} variables")
+
+                # Get all target variables
+                target_vars = []
+                for elt in node.target.elts:
+                    if not isinstance(elt, ast.Name):
+                        raise NotImplementedError("zip() target variables must be simple names")
+                    target_vars.append(elt.id)
+
+                # Get all iterables
+                iterable_codes = []
+                iterable_names = []
+                for arg in node.iter.args:
+                    code, _ = self.visit_expr(arg)
+                    iterable_codes.append(code)
+                    if isinstance(arg, ast.Name):
+                        iterable_names.append(arg.id)
+                    else:
+                        iterable_names.append(None)
+
+                # Create index variable
+                index_var = f"_zip_idx_{id(node)}"
+                self.emit(f"var {index_var}: i64 = 0;")
+
+                # Find minimum length across all iterables
+                min_len_var = f"_zip_min_len_{id(node)}"
+                len_exprs = [f"runtime.PyList.len({code})" for code in iterable_codes]
+                if len(len_exprs) == 2:
+                    self.emit(f"const {min_len_var} = @min({len_exprs[0]}, {len_exprs[1]});")
+                else:
+                    # For 3+ lists, chain @min calls
+                    min_expr = f"@min({len_exprs[0]}, {len_exprs[1]})"
+                    for i in range(2, len(len_exprs)):
+                        min_expr = f"@min({min_expr}, {len_exprs[i]})"
+                    self.emit(f"const {min_len_var} = {min_expr};")
+
+                # Generate while loop
+                self.emit(f"while ({index_var} < {min_len_var}) {{")
+                self.indent_level += 1
+
+                # Get items from each list
+                for i, (target_var, iterable_code, iterable_name) in enumerate(zip(target_vars, iterable_codes, iterable_names)):
+                    self.emit(f"const {target_var} = try runtime.PyList.getItem({iterable_code}, @intCast({index_var}));")
+                    self.declared_vars.add(target_var)
+
+                    # Track variable type
+                    if iterable_name:
+                        elem_type = self.list_element_types.get(iterable_name, "string")
+                        if elem_type == "int":
+                            self.var_types[target_var] = "pyint"
+                        else:
+                            self.var_types[target_var] = "string"
+
+                # Execute loop body
+                for stmt in node.body:
+                    self.visit(stmt)
+
+                # Increment index
+                self.emit(f"{index_var} += 1;")
+
+                self.indent_level -= 1
+                self.emit("}")
             else:
                 raise NotImplementedError(f"for loop over {node.iter.func.id}() not supported")
         else:

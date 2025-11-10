@@ -1,6 +1,8 @@
 # Zyth
 
-Python to Zig compiler. Write Python, run native code.
+**v0.1.0-alpha** - Early development, not production-ready
+
+Python to Zig AOT compiler. Write Python, run native code.
 
 **Up to 41x faster** than CPython | Native binaries | Zero interpreter overhead
 
@@ -103,27 +105,62 @@ Raw results: [loop_sum_results.md](benchmarks/loop_sum_results.md) · [fibonacci
 
 ## Features
 
-**Current:**
-- ✅ Function definitions with type hints
-- ✅ Integer arithmetic and recursion
-- ✅ String operations (concatenation, literals, .upper(), .lower())
-- ✅ Control flow (if/else, while, for/range)
-- ✅ Lists (literals, indexing, len, .append(), .pop())
-- ✅ Dicts (literals, key access, len)
-- ✅ Variable reassignment detection (var vs const)
-- ✅ Mixed type operations (primitive + PyObject)
-- ✅ Method calls with automatic type conversion
-- ✅ Binary compilation to native code
-- ✅ 41x+ performance improvement
+### ✅ Implemented (78/140 tests passing)
 
-**Roadmap:**
-- [ ] More string methods (.split(), .join(), .strip())
-- [ ] More list methods (.extend(), .remove(), .insert())
-- [ ] Dict methods (.keys(), .values(), .items())
-- [ ] Classes and methods
-- [ ] Standard library (zyth.web, zyth.http, zyth.ai)
+**Core Language:**
+- ✅ Function definitions with return values
+- ✅ Class inheritance with `super()`
+- ✅ Control flow (if/else, while, for loops)
+- ✅ Variable reassignment detection (var vs const)
+- ✅ Tuples with element type tracking
+- ✅ Import/module system (6/8 tests passing)
+
+**Data Types:**
+- ✅ Lists (literals, indexing, slicing, comprehensions)
+- ✅ Strings (literals, slicing, concatenation)
+- ✅ Dicts (literals, key access)
+- ✅ Integers (primitives and PyObject)
+
+**Built-in Methods (19 total):**
+- ✅ String: `upper()`, `lower()`, `split()`, `strip()`, `replace()`, `find()`, `count()`
+- ✅ List: `append()`, `pop()`, `extend()`, `remove()`, `reverse()`, `count()`, `index()`, `insert()`, `clear()`, `copy()`
+- ✅ Dict: `get()`, `keys()`, `values()`, `items()`, `copy()`
+
+**Advanced Features:**
+- ✅ List comprehensions with filters
+- ✅ List/string slicing with step (e.g., `nums[1:5:2]`)
+- ✅ Mixed type operations (primitive + PyObject)
+- ✅ Automatic memory management (reference counting)
+- ✅ Timestamp-based build cache (3x faster compilation)
+- ✅ Debug builds with memory leak detection
+
+### 🚧 In Progress
+
+- 🔨 Built-in functions: `range()`, `enumerate()`, `zip()` (codegen complete, fixing memory leaks)
+- 🔨 Exception handling: `try/except` (basic support, fixing edge cases)
+- 🔨 Variable reassignment tracking (const vs var detection)
+
+### 📋 Roadmap
+
+**Phase 1: Core Completeness**
+- [ ] File I/O operations
+- [ ] String formatting (f-strings)
+- [ ] More dict methods
+- [ ] Decorators
+- [ ] Generators
+
+**Phase 2: Standard Library**
+- [ ] zyth.web (HTTP server)
+- [ ] zyth.http (HTTP client)
+- [ ] zyth.ai (LLM integration)
+- [ ] zyth.async (async/await)
+- [ ] zyth.db (database connectors)
+
+**Phase 3: Advanced**
 - [ ] WebAssembly target
 - [ ] Goroutines and channels
+- [ ] JIT compilation
+- [ ] REPL
 
 ## Project Structure
 
@@ -174,9 +211,21 @@ See `docs/` for detailed documentation:
 
 ## Status
 
-**Phase 0: Proof of Concept** ✅
+**v0.1.0-alpha** - Active Development 🚧
 
-Validates core functionality. Production-ready compiler in development.
+- **Test Coverage:** 78/140 tests passing (55.7%)
+- **Memory Safety:** Debug builds with automatic leak detection
+- **Build Cache:** Timestamp-based compilation cache
+- **Core Features:** Functions, classes, slicing, comprehensions working
+- **In Progress:** Exception handling, built-in functions (range/enumerate/zip)
+
+**Not Production Ready:**
+- Limited Python compatibility (subset of language)
+- Active memory leak fixes in progress
+- API subject to breaking changes
+- No PyPI package yet
+
+Use for experimentation and benchmarking. Production release planned for v1.0.
 
 ## License
 

@@ -110,6 +110,8 @@ if "world" in text:
 print("=== SLICING ===")
 slice_list = numbers[2:5]
 slice_str = text[0:5]
+print(len(slice_list))
+print(len(slice_str))
 print("Slicing works: YES")
 
 print("=== ALL TESTS PASSED ===")

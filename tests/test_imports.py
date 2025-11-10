@@ -15,7 +15,7 @@ def run_example(example_name: str) -> str:
     try:
         # Compile
         result = subprocess.run(
-            ["uv", "run", "python", "-m", "zyth_core.compiler", str(example_file), output_path],
+            ["uv", "run", "python", "-m", "core.compiler", str(example_file), output_path],
             capture_output=True,
             text=True
         )

@@ -15,7 +15,7 @@ def test_vehicle_inheritance(tmp_path):
     # Compile Zyth version
     output_path = tmp_path / "vehicle_test"
     subprocess.run(
-        ["uv", "run", "python", "-m", "zyth_core.compiler",
+        ["uv", "run", "python", "-m", "core.compiler",
          "examples/class_inherit_vehicle.py", str(output_path)],
         check=True,
         capture_output=True
@@ -44,7 +44,7 @@ def test_shape_inheritance(tmp_path):
     # Compile Zyth version
     output_path = tmp_path / "shape_test"
     subprocess.run(
-        ["uv", "run", "python", "-m", "zyth_core.compiler",
+        ["uv", "run", "python", "-m", "core.compiler",
          "examples/class_inherit_shape.py", str(output_path)],
         check=True,
         capture_output=True
@@ -73,7 +73,7 @@ def test_simple_inheritance(tmp_path):
     # Compile Zyth version
     output_path = tmp_path / "simple_test"
     subprocess.run(
-        ["uv", "run", "python", "-m", "zyth_core.compiler",
+        ["uv", "run", "python", "-m", "core.compiler",
          "examples/class_inherit_simple.py", str(output_path)],
         check=True,
         capture_output=True

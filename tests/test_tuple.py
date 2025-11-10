@@ -17,7 +17,7 @@ def run_zyth_code(code: str) -> str:
 
         # Compile with zyth
         compile_result = subprocess.run(
-            ['uv', 'run', 'python', '-m', 'zyth_core.compiler', str(py_file), str(zy_bin)],
+            ['uv', 'run', 'python', '-m', 'core.compiler', str(py_file), str(zy_bin)],
             cwd=ZYTH_ROOT,
             capture_output=True,
             text=True,

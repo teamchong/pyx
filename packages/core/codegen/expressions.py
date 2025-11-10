@@ -20,6 +20,8 @@ class ExpressionVisitor:
     declared_vars: set
     imported_modules: dict[str, ParsedModule]
     class_definitions: dict[str, ClassInfo]
+    function_signatures: dict[str, dict]
+    module_functions: dict[str, dict[str, dict]]
 
     # Methods from other mixins
     def visit_compare_op(self, op: ast.AST) -> str: ...
@@ -62,13 +64,25 @@ class ExpressionVisitor:
 
             left_is_string = False
             right_is_string = False
+            left_is_pyint = False
+            right_is_pyint = False
             if isinstance(node.left, ast.Name):
                 left_is_string = self.var_types.get(node.left.id) == "string"
+                left_is_pyint = self.var_types.get(node.left.id) == "pyint"
             if isinstance(node.right, ast.Name):
                 right_is_string = self.var_types.get(node.right.id) == "string"
+                right_is_pyint = self.var_types.get(node.right.id) == "pyint"
 
             if isinstance(node.op, ast.Add) and (left_try or right_try or left_is_string or right_is_string):
-                return (f"runtime.PyString.concat(allocator, {left_code}, {right_code})", True)
+                left_expr = f"try {left_code}" if left_try else left_code
+                right_expr = f"try {right_code}" if right_try else right_code
+                return (f"runtime.PyString.concat(allocator, {left_expr}, {right_expr})", True)
+
+            # Unwrap PyInt values for arithmetic operations
+            if left_is_pyint:
+                left_code = f"runtime.PyInt.getValue({left_code})"
+            if right_is_pyint:
+                right_code = f"runtime.PyInt.getValue({right_code})"
 
             op = self.visit_bin_op(node.op)
             needs_try = left_try or right_try
@@ -121,6 +135,7 @@ class ExpressionVisitor:
             if isinstance(node.slice, ast.Slice):
                 start_code = "null"
                 end_code = "null"
+                step_code = "null"
 
                 if node.slice.lower:
                     start_val, start_try = self.visit_expr(node.slice.lower)
@@ -130,18 +145,22 @@ class ExpressionVisitor:
                     end_val, end_try = self.visit_expr(node.slice.upper)
                     end_code = end_val
 
+                if node.slice.step:
+                    step_val, step_try = self.visit_expr(node.slice.step)
+                    step_code = step_val
+
                 # Determine object type for slice method
                 obj_type = None
                 if isinstance(node.value, ast.Name):
                     obj_type = self.var_types.get(node.value.id)
 
                 if obj_type == "list":
-                    return (f"runtime.PyList.slice({obj_code}, allocator, {start_code}, {end_code}, null)", True)
+                    return (f"runtime.PyList.slice({obj_code}, allocator, {start_code}, {end_code}, {step_code})", True)
                 elif obj_type == "string":
-                    return (f"runtime.PyString.slice({obj_code}, allocator, {start_code}, {end_code}, null)", True)
+                    return (f"runtime.PyString.slice({obj_code}, allocator, {start_code}, {end_code}, {step_code})", True)
                 else:
                     # Default to string slice for unknown types
-                    return (f"runtime.PyString.slice({obj_code}, allocator, {start_code}, {end_code}, null)", True)
+                    return (f"runtime.PyString.slice({obj_code}, allocator, {start_code}, {end_code}, {step_code})", True)
             elif isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
                 # Dict access with string literal key - returns PyObject
                 key_str = node.slice.value
@@ -156,9 +175,20 @@ class ExpressionVisitor:
                 if isinstance(node.value, ast.Name):
                     obj_type = self.var_types.get(node.value.id)
 
+                # Cast i64 to usize for list/tuple indexing
+                index_type = None
+                if isinstance(node.slice, ast.Name):
+                    index_type = self.var_types.get(node.slice.id)
+
                 if obj_type == "list":
+                    # Always cast to usize for list indexing if it's a variable
+                    if isinstance(node.slice, ast.Name):
+                        index_code = f"@intCast({index_code})"
                     return (f"runtime.PyList.getItem({obj_code}, {index_code})", True)
                 elif obj_type == "tuple":
+                    # Always cast to usize for tuple indexing if it's a variable
+                    if isinstance(node.slice, ast.Name):
+                        index_code = f"@intCast({index_code})"
                     return (f"runtime.PyTuple.getItem({obj_code}, {index_code})", True)
                 elif obj_type == "string":
                     return (f"runtime.PyString.getItem(allocator, {obj_code}, {index_code})", True)
@@ -335,11 +365,23 @@ class ExpressionVisitor:
                 return (f"{func_name}.init(allocator, {', '.join(args)})", True)
 
             else:
+                # User-defined function call - check if needs allocator
                 args = []
+                needs_try = False
+
+                # Check if this is a user-defined function that needs allocator
+                if func_name in self.function_signatures:
+                    sig = self.function_signatures[func_name]
+                    if sig["needs_allocator"]:
+                        args.append("allocator")
+                    needs_try = sig.get("returns_pyobject", False)
+
                 for arg in node.args:
                     arg_code, arg_try = self.visit_expr(arg)
+                    if arg_try:
+                        arg_code = f"try {arg_code}"
                     args.append(arg_code)
-                return (f"{func_name}({', '.join(args)})", False)
+                return (f"{func_name}({', '.join(args)})", needs_try)
 
         elif isinstance(node.func, ast.Attribute):
             obj_code, obj_try = self.visit_expr(node.func.value)
@@ -374,9 +416,9 @@ class ExpressionVisitor:
 
             if method_info:
                 args = []
+                args.append(obj_code)
                 if method_info.needs_allocator:
                     args.append("allocator")
-                args.append(obj_code)
 
                 # Track method arguments separately for VOID methods (statement methods)
                 method_args = []
@@ -402,6 +444,18 @@ class ExpressionVisitor:
 
             # Handle imported module function calls and other attribute calls
             args = []
+            needs_try = obj_try
+
+            # Check if this is a module function call that needs allocator
+            if isinstance(node.func.value, ast.Name):
+                module_name = node.func.value.id
+                if module_name in self.module_functions:
+                    if method_name in self.module_functions[module_name]:
+                        sig = self.module_functions[module_name][method_name]
+                        if sig["needs_allocator"]:
+                            args.append("allocator")
+                        needs_try = sig.get("returns_pyobject", False)
+
             for arg in node.args:
                 arg_code, arg_try = self.visit_expr(arg)
                 if arg_try:
@@ -409,7 +463,7 @@ class ExpressionVisitor:
                 else:
                     args.append(arg_code)
 
-            return (f"{obj_code}.{method_name}({', '.join(args)})", obj_try)
+            return (f"{obj_code}.{method_name}({', '.join(args)})", needs_try)
 
         else:
             raise NotImplementedError(f"Call expression not implemented: {node.func.__class__.__name__}")

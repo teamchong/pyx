@@ -30,7 +30,7 @@ def run_code(code: str) -> tuple[str, str]:
 
         # Compile and run Zyth
         compile_result = subprocess.run(
-            ["uv", "run", "python", "-m", "zyth_core.compiler", py_file, zy_bin],
+            ["uv", "run", "python", "-m", "core.compiler", py_file, zy_bin],
             capture_output=True,
             text=True,
             timeout=10,

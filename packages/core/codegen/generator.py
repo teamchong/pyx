@@ -1654,6 +1654,9 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     elif method_name in ("keys", "values", "items"):
                         # dict.keys(), dict.values(), dict.items() all return lists
                         self.var_types[target.id] = "list"
+                    elif method_name == "pop":
+                        # pop() returns an element from the list (pyint for integer lists)
+                        self.var_types[target.id] = "pyint"
                     elif method_name == "copy":
                         # copy() returns same type as source
                         if obj_type == "dict":
@@ -1802,8 +1805,55 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                 self.emit(f"defer runtime.decref({temp_var}, allocator);")
                 self.emit(f"_ = std.debug.print(\"{{s}}\\n\", .{{runtime.PyString.getValue({temp_var})}});")
                 return
+            # Special handling for print() with inline PyObject expressions (method calls, slicing)
+            # to avoid memory leaks by extracting to temp variable with defer decref
+            elif node.value.args:
+                arg = node.value.args[0]
+                arg_code, arg_try = self.visit_expr(arg)
+
+                # Detect if this is a PyObject-returning expression (method call or subscript)
+                is_method_call = isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
+                is_subscript = isinstance(arg, ast.Subscript)
+
+                if arg_try and (is_method_call or is_subscript):
+                    # Determine the type to know how to print
+                    arg_type = None
+                    is_slice = False
+                    if is_subscript and isinstance(arg.value, ast.Name):
+                        arg_type = self.var_types.get(arg.value.id)
+                        is_slice = isinstance(arg.slice, ast.Slice)
+                    elif is_method_call and isinstance(arg.func.value, ast.Name):
+                        obj_name = arg.func.value.id
+                        arg_type = self.var_types.get(obj_name)
+
+                    # Extract to temp variable
+                    temp_var = f"_temp_print_{id(node)}"
+                    self.emit(f"const {temp_var} = try {arg_code};")
+                    self.emit(f"defer runtime.decref({temp_var}, allocator);")
+
+                    # Print based on type
+                    if arg_type == "string" and not is_slice:
+                        # String methods or single char subscript return PyString
+                        self.emit(f'_ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
+                    elif is_slice and (arg_type == "list" or arg_type == "tuple"):
+                        # List/tuple slice returns list - need to print as list
+                        self.emit(f'runtime.printList({temp_var});')
+                        self.emit(f'_ = std.debug.print("\\n", .{{}});')
+                    elif is_slice and arg_type == "string":
+                        # String slice returns string
+                        self.emit(f'_ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
+                    elif (arg_type == "list" or arg_type == "tuple") and not is_slice:
+                        # List/tuple single element subscript returns PyInt
+                        self.emit(f'_ = std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({temp_var})}});')
+                    elif is_method_call and arg_type == "string":
+                        # String methods return PyString
+                        self.emit(f'_ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
+                    else:
+                        # Default: try string first
+                        self.emit(f'_ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
+                    return
             # Special handling for print() with subscript inside try block
-            elif getattr(self, '_in_try_block', False) and node.value.args and isinstance(node.value.args[0], ast.Subscript):
+            if getattr(self, '_in_try_block', False) and node.value.args and isinstance(node.value.args[0], ast.Subscript):
                 # Extract subscript to temp variable first, then print it
                 subscript = node.value.args[0]
                 subscript_code, needs_try = self.visit_expr(subscript)

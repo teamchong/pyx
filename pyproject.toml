@@ -1,39 +1,18 @@
 [project]
-name = "zyth-workspace"
+name = "zyth"
 version = "0.1.0"
-description = "Zyth monorepo workspace"
+description = "Python-to-Zig AOT compiler"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0", "pytest-xdist>=3.0.0"]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-xdist>=3.0.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Run tests in parallel by default for speed
+# Run tests in parallel
 addopts = "-n auto --dist loadgroup -v"
-# Timeout for slow compilation
+# Timeout for compilation
 timeout = 300
-
-[tool.uv.workspace]
-members = [
-    "packages/core",
-    "packages/runtime",
-    "packages/cli",
-    "packages/web",
-    "packages/http",
-    "packages/ai",
-    "packages/async",
-    "packages/db",
-    "packages/pytest_compat"
-]
-
-[tool.uv.sources]
-zyth-core = { workspace = true }
-zyth-runtime = { workspace = true }
-zyth-cli = { workspace = true }
-zyth-web = { workspace = true }
-zyth-http = { workspace = true }
-zyth-ai = { workspace = true }
-zyth-async = { workspace = true }
-zyth-db = { workspace = true }
-pytest-compat = { workspace = true }

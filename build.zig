@@ -4,17 +4,26 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Test executable for lexer+parser
-    const test_exe = b.addExecutable(.{
-        .name = "test_pipeline",
-        .root_source_file = .{ .path = "test_pipeline.zig" },
-        .target = target,
-        .optimize = optimize,
+    // Main zyth compiler executable
+    const exe = b.addExecutable(.{
+        .name = "zyth",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
-    b.installArtifact(test_exe);
+    b.installArtifact(exe);
 
-    const run_test = b.addRunArtifact(test_exe);
-    const test_step = b.step("test-pipeline", "Test lexer and parser");
-    test_step.dependOn(&run_test.step);
+    // Run command
+    const run_cmd = b.addRunArtifact(exe);
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const run_step = b.step("run", "Run the zyth compiler");
+    run_step.dependOn(&run_cmd.step);
 }

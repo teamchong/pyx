@@ -1,45 +1,33 @@
-.PHONY: help install install-dev install-cli verify test test-zig lint format typecheck clean run benchmark
+.PHONY: help build install verify test test-zig lint format typecheck clean run benchmark
 
 help:
-	@echo "Zyth Development Commands"
-	@echo "========================="
-	@echo "install-dev - Full development setup (recommended first step)"
-	@echo "install     - Install workspace packages only"
-	@echo "install-cli - Install CLI to make 'zyth' command available"
-	@echo "verify      - Verify installation is working"
-	@echo "test        - Run Python tests"
-	@echo "test-zig    - Run Zig runtime tests"
-	@echo "lint        - Run linter"
-	@echo "format      - Format code"
-	@echo "typecheck   - Run type checker"
-	@echo "clean       - Remove build artifacts"
-	@echo "run         - Run example (make run FILE=examples/fibonacci.py) [DEPRECATED: use 'zyth' command]"
-	@echo "benchmark   - Run performance benchmarks"
+	@echo "Zyth Commands"
+	@echo "============="
+	@echo "build    - Build zyth compiler binary"
+	@echo "install  - Install zyth to ~/.local/bin"
+	@echo "verify   - Verify installation is working"
+	@echo "test     - Run Python tests (legacy)"
+	@echo "test-zig - Run Zig runtime tests"
+	@echo "clean    - Remove build artifacts"
 
-install-dev:
-	@echo "🔧 Setting up Zyth development environment..."
-	@command -v uv >/dev/null 2>&1 || { echo "❌ Error: uv not installed"; exit 1; }
+build:
+	@echo "🔨 Building zyth compiler..."
 	@command -v zig >/dev/null 2>&1 || { echo "❌ Error: zig not installed"; exit 1; }
-	uv sync
-	uv pip install -e packages/core -e packages/runtime -e packages/cli -e packages/web -e packages/http -e packages/ai -e packages/async -e packages/db
-	@echo ""
-	@echo "✅ Development environment ready!"
-	@echo ""
-	@echo "To use 'zyth' command, activate the virtual environment:"
-	@echo "  source .venv/bin/activate"
-	@echo ""
-	@echo "Or use: uv run zyth examples/fibonacci.py"
-	@echo ""
+	zig build
+	@echo "✅ Binary built: zig-out/bin/zyth"
 
-install:
-	uv sync
-
-install-cli:
-	uv pip install -e packages/cli
+install: build
+	@echo "📦 Installing zyth to ~/.local/bin..."
+	@mkdir -p ~/.local/bin
+	@cp zig-out/bin/zyth ~/.local/bin/zyth
+	@chmod +x ~/.local/bin/zyth
 	@echo ""
-	@echo "✅ CLI installed! Activate venv to use:"
-	@echo "  source .venv/bin/activate"
-	@echo "  zyth --help"
+	@echo "✅ Zyth installed!"
+	@echo ""
+	@echo "Make sure ~/.local/bin is in your PATH:"
+	@echo "  export PATH=\"\$$HOME/.local/bin:\$$PATH\""
+	@echo ""
+	@echo "Then run: zyth your_file.py"
 	@echo ""
 
 verify:

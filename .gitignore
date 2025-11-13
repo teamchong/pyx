@@ -56,7 +56,6 @@ output
 fib_binary
 *_zyth
 /tmp/
-bin/
 
 # UV
 uv.lock
@@ -70,3 +69,4 @@ _prototype/
 *.bak*
 *.before_fix
 .venv/
+.zyth/

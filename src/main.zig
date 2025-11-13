@@ -50,6 +50,44 @@ fn compileFile(allocator: std.mem.Allocator, input_path: []const u8, output_path
     const source = try std.fs.cwd().readFileAlloc(allocator, input_path, 10 * 1024 * 1024); // 10MB max
     defer allocator.free(source);
 
+    // Determine output path
+    const bin_path_allocated = output_path == null;
+    const bin_path = output_path orelse blk: {
+        const basename = std.fs.path.basename(input_path);
+        const name_no_ext = if (std.mem.lastIndexOf(u8, basename, ".")) |idx|
+            basename[0..idx]
+        else
+            basename;
+
+        // Create .zyth/ directory if it doesn't exist
+        std.fs.cwd().makeDir(".zyth") catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+        };
+
+        const path = try std.fmt.allocPrint(allocator, ".zyth/{s}", .{name_no_ext});
+        break :blk path;
+    };
+    defer if (bin_path_allocated) allocator.free(bin_path);
+
+    // Check if binary is up-to-date using content hash
+    const should_compile = try shouldRecompile(allocator, source, bin_path);
+
+    if (!should_compile) {
+        // Binary is up-to-date, skip compilation
+        if (std.mem.eql(u8, mode, "run")) {
+            // Just run the existing binary
+            const result = try std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &[_][]const u8{bin_path},
+            });
+            defer allocator.free(result.stdout);
+            defer allocator.free(result.stderr);
+        } else {
+            std.debug.print("✓ Binary up-to-date: {s}\n", .{bin_path});
+        }
+        return;
+    }
+
     // PHASE 1: Lexer - Tokenize source code
     std.debug.print("Lexing...\n", .{});
     var lex = try lexer.Lexer.init(allocator, source);
@@ -69,30 +107,14 @@ fn compileFile(allocator: std.mem.Allocator, input_path: []const u8, output_path
     const zig_code = try codegen.generate(allocator, tree);
     defer allocator.free(zig_code);
 
-    // Determine output path
-    const bin_path_allocated = output_path == null;
-    const bin_path = output_path orelse blk: {
-        const basename = std.fs.path.basename(input_path);
-        const name_no_ext = if (std.mem.lastIndexOf(u8, basename, ".")) |idx|
-            basename[0..idx]
-        else
-            basename;
-
-        // Create bin/ directory if it doesn't exist
-        std.fs.cwd().makeDir("bin") catch |err| {
-            if (err != error.PathAlreadyExists) return err;
-        };
-
-        const path = try std.fmt.allocPrint(allocator, "bin/{s}", .{name_no_ext});
-        break :blk path;
-    };
-    defer if (bin_path_allocated) allocator.free(bin_path);
-
     // Compile Zig code to binary
     std.debug.print("Compiling to binary...\n", .{});
     try compiler.compileZig(allocator, zig_code, bin_path);
 
     std.debug.print("✓ Compiled successfully to: {s}\n", .{bin_path});
+
+    // Update cache with new hash
+    try updateCache(allocator, source, bin_path);
 
     // Run if mode is "run"
     if (std.mem.eql(u8, mode, "run")) {
@@ -116,4 +138,68 @@ fn printUsage() !void {
         \\  zyth test                   # Run test suite
         \\
     , .{});
+}
+
+/// Compute SHA256 hash of source content
+fn computeHash(source: []const u8) [32]u8 {
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(source, &hash, .{});
+    return hash;
+}
+
+/// Get cache file path for a binary
+fn getCachePath(allocator: std.mem.Allocator, bin_path: []const u8) ![]const u8 {
+    // Cache file next to binary: .zyth/fibonacci.hash
+    return try std.fmt.allocPrint(allocator, "{s}.hash", .{bin_path});
+}
+
+/// Check if recompilation is needed (compare source hash with cached hash)
+fn shouldRecompile(allocator: std.mem.Allocator, source: []const u8, bin_path: []const u8) !bool {
+    // Check if binary exists
+    std.fs.cwd().access(bin_path, .{}) catch return true; // Binary missing, must compile
+
+    // Compute current source hash
+    const current_hash = computeHash(source);
+
+    // Read cached hash
+    const cache_path = try getCachePath(allocator, bin_path);
+    defer allocator.free(cache_path);
+
+    const cached_hash_hex = std.fs.cwd().readFileAlloc(allocator, cache_path, 1024) catch {
+        return true; // Cache missing, must compile
+    };
+    defer allocator.free(cached_hash_hex);
+
+    // Convert hex string back to bytes
+    if (cached_hash_hex.len != 64) return true; // Invalid cache
+
+    var cached_hash: [32]u8 = undefined;
+    for (0..32) |i| {
+        cached_hash[i] = std.fmt.parseInt(u8, cached_hash_hex[i * 2 .. i * 2 + 2], 16) catch return true;
+    }
+
+    // Compare hashes
+    return !std.mem.eql(u8, &current_hash, &cached_hash);
+}
+
+/// Update cache with new source hash
+fn updateCache(allocator: std.mem.Allocator, source: []const u8, bin_path: []const u8) !void {
+    const hash = computeHash(source);
+
+    // Convert hash to hex string (manually)
+    var hex_buf: [64]u8 = undefined;
+    const hex_chars = "0123456789abcdef";
+    for (hash, 0..) |byte, i| {
+        hex_buf[i * 2] = hex_chars[byte >> 4];
+        hex_buf[i * 2 + 1] = hex_chars[byte & 0x0F];
+    }
+
+    // Write to cache file
+    const cache_path = try getCachePath(allocator, bin_path);
+    defer allocator.free(cache_path);
+
+    const file = try std.fs.cwd().createFile(cache_path, .{});
+    defer file.close();
+
+    try file.writeAll(&hex_buf);
 }

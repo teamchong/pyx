@@ -36,7 +36,7 @@ pub fn visitFunctionDef(self: *ZigCodeGenerator, func: ast.Node.FunctionDef) Cod
     // Close signature - assume i64 return type for now
     try buf.writer(self.allocator).writeAll(") i64 {");
 
-    try self.emit(try buf.toOwnedSlice(self.allocator));
+    try self.emitOwned(try buf.toOwnedSlice(self.allocator));
     self.indent();
 
     // Generate function body

@@ -116,6 +116,12 @@ pub const ZigCodeGenerator = struct {
         try self.output.append(self.allocator, '\n');
     }
 
+    /// Emit a line and free the owned slice after copying it
+    pub fn emitOwned(self: *ZigCodeGenerator, code: []const u8) CodegenError!void {
+        defer self.allocator.free(code);
+        try self.emit(code);
+    }
+
     /// Increase indentation level
     pub fn indent(self: *ZigCodeGenerator) void {
         self.indent_level += 1;

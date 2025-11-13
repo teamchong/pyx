@@ -35,7 +35,7 @@ pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenE
     try self.class_names.put(class.name, {});
     var buf = std.ArrayList(u8){};
     try buf.writer(self.allocator).print("const {s} = struct {{", .{class.name});
-    try self.emit(try buf.toOwnedSlice(self.allocator));
+    try self.emitOwned(try buf.toOwnedSlice(self.allocator));
     self.indent();
 
     var init_method: ?ast.Node.FunctionDef = null;
@@ -67,7 +67,7 @@ pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenE
                                         if (std.mem.eql(u8, name.id, "self")) {
                                             var field_buf = std.ArrayList(u8){};
                                             try field_buf.writer(self.allocator).print("{s}: i64,", .{attr.attr});
-                                            try self.emit(try field_buf.toOwnedSlice(self.allocator));
+                                            try self.emitOwned(try field_buf.toOwnedSlice(self.allocator));
                                         }
                                     },
                                     else => {},
@@ -92,12 +92,12 @@ pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenE
         }
 
         try buf.writer(self.allocator).print(") {s} {{", .{class.name});
-        try self.emit(try buf.toOwnedSlice(self.allocator));
+        try self.emitOwned(try buf.toOwnedSlice(self.allocator));
         self.indent();
 
         buf = std.ArrayList(u8){};
         try buf.writer(self.allocator).print("return {s}{{", .{class.name});
-        try self.emit(try buf.toOwnedSlice(self.allocator));
+        try self.emitOwned(try buf.toOwnedSlice(self.allocator));
         self.indent();
 
         for (init_func.body) |stmt| {
@@ -112,7 +112,7 @@ pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenE
                                             const value_result = try expressions.visitExpr(self,assign.value.*);
                                             buf = std.ArrayList(u8){};
                                             try buf.writer(self.allocator).print(".{s} = {s},", .{ attr.attr, value_result.code });
-                                            try self.emit(try buf.toOwnedSlice(self.allocator));
+                                            try self.emitOwned(try buf.toOwnedSlice(self.allocator));
                                         }
                                     },
                                     else => {},
@@ -147,7 +147,7 @@ pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenE
         }
 
         try buf.writer(self.allocator).writeAll(") void {");
-        try self.emit(try buf.toOwnedSlice(self.allocator));
+        try self.emitOwned(try buf.toOwnedSlice(self.allocator));
         self.indent();
 
         for (method.body) |stmt| {

@@ -154,7 +154,7 @@ fn visitList(self: *ZigCodeGenerator, list: ast.Node.List) CodegenError!ExprResu
     // Emit list creation as statements
     var create_buf = std.ArrayList(u8){};
     try create_buf.writer(self.allocator).print("const {s} = try runtime.PyList.create(allocator);", .{list_var});
-    try self.emit(try create_buf.toOwnedSlice(self.allocator));
+    try self.emitOwned(try create_buf.toOwnedSlice(self.allocator));
 
     // Append each element
     for (list.elts) |elt| {
@@ -187,7 +187,7 @@ fn visitList(self: *ZigCodeGenerator, list: ast.Node.List) CodegenError!ExprResu
         } else {
             try append_buf.writer(self.allocator).print("try runtime.PyList.append({s}, {s});", .{ list_var, elt_result.code });
         }
-        try self.emit(try append_buf.toOwnedSlice(self.allocator));
+        try self.emitOwned(try append_buf.toOwnedSlice(self.allocator));
     }
 
     // Return the list variable name
@@ -211,7 +211,7 @@ fn visitDict(self: *ZigCodeGenerator, dict: ast.Node.Dict) CodegenError!ExprResu
     // Emit dict creation as statement
     var create_buf = std.ArrayList(u8){};
     try create_buf.writer(self.allocator).print("const {s} = try runtime.PyDict.create(allocator);", .{dict_var});
-    try self.emit(try create_buf.toOwnedSlice(self.allocator));
+    try self.emitOwned(try create_buf.toOwnedSlice(self.allocator));
 
     // Set each key-value pair
     for (dict.keys, dict.values) |key, value| {
@@ -260,7 +260,7 @@ fn visitDict(self: *ZigCodeGenerator, dict: ast.Node.Dict) CodegenError!ExprResu
         } else value_result.code;
 
         try set_buf.writer(self.allocator).print("try runtime.PyDict.set({s}, {s}, {s});", .{ dict_var, key_code, value_code });
-        try self.emit(try set_buf.toOwnedSlice(self.allocator));
+        try self.emitOwned(try set_buf.toOwnedSlice(self.allocator));
     }
 
     // Return the dict variable name
@@ -284,7 +284,7 @@ fn visitTuple(self: *ZigCodeGenerator, tuple: ast.Node.Tuple) CodegenError!ExprR
     // Emit tuple creation as statement
     var create_buf = std.ArrayList(u8){};
     try create_buf.writer(self.allocator).print("const {s} = try runtime.PyTuple.create(allocator, {d});", .{ tuple_var, tuple.elts.len });
-    try self.emit(try create_buf.toOwnedSlice(self.allocator));
+    try self.emitOwned(try create_buf.toOwnedSlice(self.allocator));
 
     // Set each element
     for (tuple.elts, 0..) |elt, i| {
@@ -317,7 +317,7 @@ fn visitTuple(self: *ZigCodeGenerator, tuple: ast.Node.Tuple) CodegenError!ExprR
         } else {
             try set_buf.writer(self.allocator).print("runtime.PyTuple.setItem({s}, {d}, {s});", .{ tuple_var, i, elt_result.code });
         }
-        try self.emit(try set_buf.toOwnedSlice(self.allocator));
+        try self.emitOwned(try set_buf.toOwnedSlice(self.allocator));
     }
 
     // Return the tuple variable name

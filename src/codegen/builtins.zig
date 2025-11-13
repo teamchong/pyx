@@ -33,7 +33,7 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
                         "else {{ std.debug.print(\"{{any}}\\n\", .{{{s}}}); }}",
                         .{ name.id, name.id, name.id, name.id, name.id }
                     );
-                    try self.emit(try print_buf.toOwnedSlice(self.allocator));
+                    try self.emitOwned(try print_buf.toOwnedSlice(self.allocator));
                     // Return empty code since we already emitted the statement
                     return ExprResult{
                         .code = "",
@@ -45,7 +45,7 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
                     // Emit tuple print as statement
                     var print_buf = std.ArrayList(u8){};
                     try print_buf.writer(self.allocator).print("{{ runtime.PyTuple.print({s}); std.debug.print(\"\\n\", .{{}}); }}", .{arg_result.code});
-                    try self.emit(try print_buf.toOwnedSlice(self.allocator));
+                    try self.emitOwned(try print_buf.toOwnedSlice(self.allocator));
                     return ExprResult{
                         .code = "",
                         .needs_try = false,
@@ -76,7 +76,7 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
                 "}} }}",
                 .{temp_var, unwrap, arg_result.code, temp_var, temp_var, temp_var, temp_var}
             );
-            try self.emit(try print_buf.toOwnedSlice(self.allocator));
+            try self.emitOwned(try print_buf.toOwnedSlice(self.allocator));
             return ExprResult{
                 .code = "",
                 .needs_try = false,

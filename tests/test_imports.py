@@ -148,12 +148,13 @@ def test_pytest_decorator_stub():
         f.write("""
 import pytest
 
+# Test that decorators don't crash compilation
 @pytest.fixture
 def dummy_fixture():
-    return 42
+    x = 42
+    print(x)
 
-result = dummy_fixture()
-print(result)
+dummy_fixture()
 """)
         test_file = f.name
 

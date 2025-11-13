@@ -100,12 +100,15 @@ def cmd_build(args):
     path = Path(args.path) if args.path else Path(".")
 
     # Determine recursive mode
+    # Default: recursive for all paths
+    # Exception: '.' means current dir only (non-recursive)
     recursive = True
-    if args.path:
-        # If path ends with '/' or is explicitly '.', treat as single level
-        if args.path.endswith('/') or args.path == '.':
-            recursive = False
-            path = Path(args.path.rstrip('/'))
+    if args.path == '.':
+        recursive = False
+
+    # Normalize path (remove trailing slash if present)
+    if args.path and args.path.endswith('/'):
+        path = Path(args.path.rstrip('/'))
 
     # Collect files
     files = collect_python_files(path, recursive)

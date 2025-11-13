@@ -1735,16 +1735,16 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                 # If either side is a subscript (returns PyObject), extract the value
                 left_expr = left_code
                 if isinstance(node.value.left, ast.Subscript):
-                    left_expr = f"runtime.PyInt.getValue({left_code})"
+                    left_expr = f"runtime.PyInt.getValue(try {left_code})"
 
                 right_expr = right_code
                 if isinstance(node.value.right, ast.Subscript):
-                    right_expr = f"runtime.PyInt.getValue({right_code})"
+                    right_expr = f"runtime.PyInt.getValue(try {right_code})"
                 # Also check if right side is a method call that returns PyObject (like pop())
                 elif isinstance(node.value.right, ast.Call) and isinstance(node.value.right.func, ast.Attribute):
                     method_name = node.value.right.func.attr
                     if method_name == "pop":
-                        right_expr = f"runtime.PyInt.getValue({right_code})"
+                        right_expr = f"runtime.PyInt.getValue(try {right_code})"
 
                 # If we modified either expression, use the extracted values
                 if left_expr != left_code or right_expr != right_code:

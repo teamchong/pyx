@@ -1,3 +1,5 @@
 # For loop with range
-for i in range(2000000):
-    print(i)
+sum = 0
+for i in range(100000000):
+    sum = sum + 1
+print(sum)

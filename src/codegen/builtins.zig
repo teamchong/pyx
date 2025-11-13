@@ -3,6 +3,7 @@ const ast = @import("../ast.zig");
 const CodegenError = @import("../codegen.zig").CodegenError;
 const ExprResult = @import("../codegen.zig").ExprResult;
 const ZigCodeGenerator = @import("../codegen.zig").ZigCodeGenerator;
+const expressions = @import("expressions.zig");
 
 pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!ExprResult {
     if (args.len == 0) {
@@ -13,7 +14,7 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
     }
 
     const arg = args[0];
-    const arg_result = try self.visitExpr(arg);
+    const arg_result = try expressions.visitExpr(self,arg);
 
     var buf = std.ArrayList(u8){};
 
@@ -74,7 +75,7 @@ pub fn visitLenCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
     if (args.len == 0) return error.MissingLenArg;
 
     const arg = args[0];
-    const arg_result = try self.visitExpr(arg);
+    const arg_result = try expressions.visitExpr(self,arg);
 
     var buf = std.ArrayList(u8){};
 
@@ -109,7 +110,7 @@ pub fn visitAbsCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
     if (args.len == 0) return error.MissingLenArg;
 
     const arg = args[0];
-    const arg_result = try self.visitExpr(arg);
+    const arg_result = try expressions.visitExpr(self,arg);
 
     var buf = std.ArrayList(u8){};
     try buf.writer(self.allocator).print("@abs({s})", .{arg_result.code});
@@ -124,7 +125,7 @@ pub fn visitRoundCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
     if (args.len == 0) return error.MissingLenArg;
 
     const arg = args[0];
-    const arg_result = try self.visitExpr(arg);
+    const arg_result = try expressions.visitExpr(self,arg);
 
     var buf = std.ArrayList(u8){};
     // Python's round() returns an int, Zig's @round() returns same type
@@ -144,18 +145,18 @@ pub fn visitMinCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
 
     if (args.len == 1) {
         // min([1, 2, 3]) - list argument - needs runtime
-        const arg_result = try self.visitExpr(args[0]);
+        const arg_result = try expressions.visitExpr(self,args[0]);
         try buf.writer(self.allocator).print("runtime.minList({s})", .{arg_result.code});
     } else if (args.len == 2) {
         // min(a, b) - use @min builtin
-        const arg1 = try self.visitExpr(args[0]);
-        const arg2 = try self.visitExpr(args[1]);
+        const arg1 = try expressions.visitExpr(self,args[0]);
+        const arg2 = try expressions.visitExpr(self,args[1]);
         try buf.writer(self.allocator).print("@min({s}, {s})", .{ arg1.code, arg2.code });
     } else {
         // min(a, b, c, ...) - chain @min calls
-        var result_code = try self.visitExpr(args[0]);
+        var result_code = try expressions.visitExpr(self,args[0]);
         for (args[1..]) |arg| {
-            const arg_result = try self.visitExpr(arg);
+            const arg_result = try expressions.visitExpr(self,arg);
             var temp_buf = std.ArrayList(u8){};
             try temp_buf.writer(self.allocator).print("@min({s}, {s})", .{ result_code.code, arg_result.code });
             result_code.code = try temp_buf.toOwnedSlice(self.allocator);
@@ -176,18 +177,18 @@ pub fn visitMaxCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
 
     if (args.len == 1) {
         // max([1, 2, 3]) - list argument - needs runtime
-        const arg_result = try self.visitExpr(args[0]);
+        const arg_result = try expressions.visitExpr(self,args[0]);
         try buf.writer(self.allocator).print("runtime.maxList({s})", .{arg_result.code});
     } else if (args.len == 2) {
         // max(a, b) - use @max builtin
-        const arg1 = try self.visitExpr(args[0]);
-        const arg2 = try self.visitExpr(args[1]);
+        const arg1 = try expressions.visitExpr(self,args[0]);
+        const arg2 = try expressions.visitExpr(self,args[1]);
         try buf.writer(self.allocator).print("@max({s}, {s})", .{ arg1.code, arg2.code });
     } else {
         // max(a, b, c, ...) - chain @max calls
-        var result_code = try self.visitExpr(args[0]);
+        var result_code = try expressions.visitExpr(self,args[0]);
         for (args[1..]) |arg| {
-            const arg_result = try self.visitExpr(arg);
+            const arg_result = try expressions.visitExpr(self,arg);
             var temp_buf = std.ArrayList(u8){};
             try temp_buf.writer(self.allocator).print("@max({s}, {s})", .{ result_code.code, arg_result.code });
             result_code.code = try temp_buf.toOwnedSlice(self.allocator);
@@ -205,7 +206,7 @@ pub fn visitSumCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
     if (args.len == 0) return error.MissingLenArg;
 
     const arg = args[0];
-    const arg_result = try self.visitExpr(arg);
+    const arg_result = try expressions.visitExpr(self,arg);
 
     var buf = std.ArrayList(u8){};
     try buf.writer(self.allocator).print("runtime.sum({s})", .{arg_result.code});
@@ -220,7 +221,7 @@ pub fn visitAllCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
     if (args.len == 0) return error.MissingLenArg;
 
     const arg = args[0];
-    const arg_result = try self.visitExpr(arg);
+    const arg_result = try expressions.visitExpr(self,arg);
 
     var buf = std.ArrayList(u8){};
     try buf.writer(self.allocator).print("runtime.all({s})", .{arg_result.code});
@@ -235,7 +236,7 @@ pub fn visitAnyCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
     if (args.len == 0) return error.MissingLenArg;
 
     const arg = args[0];
-    const arg_result = try self.visitExpr(arg);
+    const arg_result = try expressions.visitExpr(self,arg);
 
     var buf = std.ArrayList(u8){};
     try buf.writer(self.allocator).print("runtime.any({s})", .{arg_result.code});

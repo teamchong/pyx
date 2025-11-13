@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast = @import("../ast.zig");
 const codegen = @import("../codegen.zig");
+const expressions = @import("expressions.zig");
 
 pub const CodegenError = codegen.CodegenError;
 pub const ExprResult = codegen.ExprResult;
@@ -40,8 +41,8 @@ fn visitCompareOp(self: *ZigCodeGenerator, op: ast.CompareOp) []const u8 {
 
 /// Visit binary operation node (e.g., a + b, a * b)
 pub fn visitBinOp(self: *ZigCodeGenerator, binop: ast.Node.BinOp) CodegenError!ExprResult {
-    const left_result = try self.visitExpr(binop.left.*);
-    const right_result = try self.visitExpr(binop.right.*);
+    const left_result = try expressions.visitExpr(self,binop.left.*);
+    const right_result = try expressions.visitExpr(self,binop.right.*);
 
     var buf = std.ArrayList(u8){};
 
@@ -70,7 +71,7 @@ pub fn visitBinOp(self: *ZigCodeGenerator, binop: ast.Node.BinOp) CodegenError!E
 
 /// Visit unary operation node (e.g., -x, !x, +x)
 pub fn visitUnaryOp(self: *ZigCodeGenerator, unaryop: ast.Node.UnaryOp) CodegenError!ExprResult {
-    const operand_result = try self.visitExpr(unaryop.operand.*);
+    const operand_result = try expressions.visitExpr(self,unaryop.operand.*);
 
     const op_str = switch (unaryop.op) {
         .Not => "!",
@@ -93,8 +94,8 @@ pub fn visitBoolOp(self: *ZigCodeGenerator, boolop: ast.Node.BoolOp) CodegenErro
         return error.UnsupportedExpression;
     }
 
-    const left_result = try self.visitExpr(boolop.values[0]);
-    const right_result = try self.visitExpr(boolop.values[1]);
+    const left_result = try expressions.visitExpr(self,boolop.values[0]);
+    const right_result = try expressions.visitExpr(self,boolop.values[1]);
 
     const op_str = switch (boolop.op) {
         .And => "and",
@@ -116,8 +117,8 @@ pub fn visitCompare(self: *ZigCodeGenerator, compare: ast.Node.Compare) CodegenE
         return error.InvalidCompare;
     }
 
-    const left_result = try self.visitExpr(compare.left.*);
-    const right_result = try self.visitExpr(compare.comparators[0]);
+    const left_result = try expressions.visitExpr(self,compare.left.*);
+    const right_result = try expressions.visitExpr(self,compare.comparators[0]);
 
     const op = compare.ops[0];
     var buf = std.ArrayList(u8){};

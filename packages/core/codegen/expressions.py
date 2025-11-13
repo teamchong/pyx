@@ -146,20 +146,33 @@ class ExpressionVisitor:
             if right_is_pyint:
                 right_code = f"runtime.PyInt.getValue({right_code})"
 
-            # Also unwrap method calls that return PyObjects (like pop(), getItem())
+            # Also unwrap PyObject operations that return ints
             # These return error unions, so we need to use 'try'
+
+            # Handle method calls like pop(), getItem()
             if right_try and isinstance(node.right, ast.Call):
                 if isinstance(node.right.func, ast.Attribute):
                     method_name = node.right.func.attr
-                    # Methods like pop() and getItem() return PyObject containing ints
                     if method_name in ("pop", "getItem"):
                         right_code = f"runtime.PyInt.getValue(try {right_code})"
+                        right_try = False  # Error union consumed by 'try'
+
+            # Handle subscript operations like list[i]
+            elif right_try and isinstance(node.right, ast.Subscript):
+                # Subscript returns error union !*PyObject that needs unwrapping
+                right_code = f"runtime.PyInt.getValue(try {right_code})"
+                right_try = False
 
             if left_try and isinstance(node.left, ast.Call):
                 if isinstance(node.left.func, ast.Attribute):
                     method_name = node.left.func.attr
                     if method_name in ("pop", "getItem"):
                         left_code = f"runtime.PyInt.getValue(try {left_code})"
+                        left_try = False  # Error union consumed by 'try'
+
+            elif left_try and isinstance(node.left, ast.Subscript):
+                left_code = f"runtime.PyInt.getValue(try {left_code})"
+                left_try = False
 
             # Special handling for floor division and power operators
             if isinstance(node.op, ast.FloorDiv):

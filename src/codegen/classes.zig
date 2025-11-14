@@ -31,6 +31,18 @@ pub fn visitClassInstantiation(self: *ZigCodeGenerator, class_name: []const u8, 
     };
 }
 
+/// Infer return type from method body by checking for return statements
+fn inferReturnType(body: []ast.Node) []const u8 {
+    for (body) |node| {
+        if (node == .return_stmt) {
+            // Method has a return statement, assume it returns i64 for now
+            return "i64";
+        }
+    }
+    // No return statement found, method returns void
+    return "void";
+}
+
 pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenError!void {
     try self.class_names.put(class.name, {});
 
@@ -159,7 +171,9 @@ pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenE
             }
         }
 
-        try buf.writer(self.temp_allocator).writeAll(") void {");
+        // Infer return type from method body
+        const return_type = inferReturnType(method.body);
+        try buf.writer(self.temp_allocator).print(") {s} {{", .{return_type});
         try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
         self.indent();
 
@@ -206,6 +220,46 @@ pub fn visitMethodCall(self: *ZigCodeGenerator, attr: ast.Node.Attribute, args: 
     const obj_result = try expressions.visitExpr(self,attr.value.*);
     const method_name = attr.attr;
     var buf = std.ArrayList(u8){};
+
+    // Check if this is a user-defined class method call
+    // If the object is a class instance (not a PyObject type), handle it first
+    const is_class_method = blk: {
+        switch (attr.value.*) {
+            .name => |obj_name| {
+                const var_type = self.var_types.get(obj_name.id);
+                // If no type info or not a PyObject type, assume it's a class instance
+                if (var_type == null) {
+                    break :blk true;
+                }
+                // Not a PyObject built-in type
+                if (!std.mem.eql(u8, var_type.?, "pyobject") and
+                    !std.mem.eql(u8, var_type.?, "string") and
+                    !std.mem.eql(u8, var_type.?, "list") and
+                    !std.mem.eql(u8, var_type.?, "dict"))
+                {
+                    break :blk true;
+                }
+                break :blk false;
+            },
+            else => break :blk false,
+        }
+    };
+
+    if (is_class_method) {
+        // User-defined class method - generate obj.method(args)
+        try buf.writer(self.temp_allocator).print("{s}.{s}(", .{ obj_result.code, method_name });
+        for (args, 0..) |arg, i| {
+            if (i > 0) try buf.writer(self.temp_allocator).writeAll(", ");
+            const arg_result = try expressions.visitExpr(self,arg);
+            if (arg_result.needs_try) {
+                try buf.writer(self.temp_allocator).print("try {s}", .{arg_result.code});
+            } else {
+                try buf.writer(self.temp_allocator).writeAll(arg_result.code);
+            }
+        }
+        try buf.writer(self.temp_allocator).writeAll(")");
+        return ExprResult{ .code = try buf.toOwnedSlice(self.temp_allocator), .needs_try = false };
+    }
 
     // String methods
     if (std.mem.eql(u8, method_name, "upper")) {

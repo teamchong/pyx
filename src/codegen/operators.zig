@@ -219,7 +219,34 @@ pub fn visitCompare(self: *ZigCodeGenerator, compare: ast.Node.Compare) CodegenE
         }
     } else {
         const op_str = visitCompareOp(self, op);
-        try buf.writer(self.temp_allocator).print("{s} {s} {s}", .{ left_result.code, op_str, right_result.code });
+
+        // Unwrap PyObjects if needed
+        var left_code = left_result.code;
+        var right_code = right_result.code;
+
+        // Check if left operand is a PyObject variable that needs unwrapping
+        if (compare.left.* == .name) {
+            const var_name = compare.left.*.name.id;
+            const var_type = self.var_types.get(var_name);
+            if (var_type) |vtype| {
+                if (std.mem.eql(u8, vtype, "pyobject")) {
+                    left_code = try std.fmt.allocPrint(self.allocator, "runtime.PyInt.getValue({s})", .{left_code});
+                }
+            }
+        }
+
+        // Check if right operand is a PyObject variable that needs unwrapping
+        if (compare.comparators[0] == .name) {
+            const var_name = compare.comparators[0].name.id;
+            const var_type = self.var_types.get(var_name);
+            if (var_type) |vtype| {
+                if (std.mem.eql(u8, vtype, "pyobject")) {
+                    right_code = try std.fmt.allocPrint(self.allocator, "runtime.PyInt.getValue({s})", .{right_code});
+                }
+            }
+        }
+
+        try buf.writer(self.temp_allocator).print("{s} {s} {s}", .{ left_code, op_str, right_code });
     }
 
     return ExprResult{

@@ -18,6 +18,7 @@ pub const Node = union(enum) {
     class_def: ClassDef,
     return_stmt: Return,
     list: List,
+    listcomp: ListComp,
     dict: Dict,
     tuple: Tuple,
     subscript: Subscript,
@@ -106,6 +107,13 @@ pub const Node = union(enum) {
 
     pub const List = struct {
         elts: []Node,
+    };
+
+    pub const ListComp = struct {
+        elt: *Node, // Expression to evaluate for each element
+        target: *Node, // Loop variable (e.g., 'x' in 'for x in items')
+        iter: *Node, // Iterable (e.g., 'items')
+        ifs: []Node, // Optional filter conditions
     };
 
     pub const Dict = struct {
@@ -239,6 +247,16 @@ pub const Node = union(enum) {
             .list => |l| {
                 for (l.elts) |*e| e.deinit(allocator);
                 allocator.free(l.elts);
+            },
+            .listcomp => |lc| {
+                lc.elt.deinit(allocator);
+                allocator.destroy(lc.elt);
+                lc.target.deinit(allocator);
+                allocator.destroy(lc.target);
+                lc.iter.deinit(allocator);
+                allocator.destroy(lc.iter);
+                for (lc.ifs) |*f| f.deinit(allocator);
+                allocator.free(lc.ifs);
             },
             .dict => |d| {
                 for (d.keys) |*k| k.deinit(allocator);

@@ -356,6 +356,15 @@ pub const ZigCodeGenerator = struct {
                 self.needs_runtime = true;
                 self.needs_allocator = true;
             },
+            .listcomp => |lc| {
+                self.needs_runtime = true;
+                self.needs_allocator = true;
+                try self.detectRuntimeNeedsExpr(lc.elt.*);
+                try self.detectRuntimeNeedsExpr(lc.iter.*);
+                for (lc.ifs) |cond| {
+                    try self.detectRuntimeNeedsExpr(cond);
+                }
+            },
             .dict => {
                 self.needs_runtime = true;
                 self.needs_allocator = true;
@@ -426,6 +435,15 @@ pub const ZigCodeGenerator = struct {
             .list => {
                 self.needs_runtime = true;
                 self.needs_allocator = true;
+            },
+            .listcomp => |lc| {
+                self.needs_runtime = true;
+                self.needs_allocator = true;
+                try self.detectRuntimeNeedsExpr(lc.elt.*);
+                try self.detectRuntimeNeedsExpr(lc.iter.*);
+                for (lc.ifs) |cond| {
+                    try self.detectRuntimeNeedsExpr(cond);
+                }
             },
             .dict => {
                 self.needs_runtime = true;

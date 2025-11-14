@@ -70,19 +70,84 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
 
             try print_buf.writer(self.temp_allocator).print(
                 "{{ const {s} = {s}{s}; " ++
+                "defer runtime.decref({s}, allocator); " ++
                 "switch ({s}.type_id) {{ " ++
                 ".int => std.debug.print(\"{{}}\\n\", .{{runtime.PyInt.getValue({s})}}), " ++
                 ".string => std.debug.print(\"{{s}}\\n\", .{{runtime.PyString.getValue({s})}}), " ++
                 ".list => {{ runtime.printList({s}); std.debug.print(\"\\n\", .{{}}); }}, " ++
                 "else => std.debug.print(\"{{any}}\\n\", .{{{s}}}), " ++
                 "}} }}",
-                .{temp_var, unwrap, arg_result.code, temp_var, temp_var, temp_var, temp_var, temp_var}
+                .{temp_var, unwrap, arg_result.code, temp_var, temp_var, temp_var, temp_var, temp_var, temp_var}
             );
             try self.emitOwned(try print_buf.toOwnedSlice(self.temp_allocator));
             return ExprResult{
                 .code = "",
                 .needs_try = false,
             };
+        },
+        .call => |call| {
+            // Check if this is a function call that returns a primitive (like len, abs, etc.)
+            const returns_primitive = blk: {
+                switch (call.func.*) {
+                    .name => |func_name| {
+                        // Functions that return primitives, not PyObjects
+                        const primitive_funcs = [_][]const u8{"len", "abs", "round", "min", "max", "sum"};
+                        for (primitive_funcs) |pf| {
+                            if (std.mem.eql(u8, func_name.id, pf)) {
+                                break :blk true;
+                            }
+                        }
+                        break :blk false;
+                    },
+                    .attribute => |attr| {
+                        // Some methods return primitives (count, index, find)
+                        // Others return PyObjects (upper, strip, etc.)
+                        const primitive_methods = [_][]const u8{"count", "index", "find"};
+                        for (primitive_methods) |pm| {
+                            if (std.mem.eql(u8, attr.attr, pm)) {
+                                break :blk true;
+                            }
+                        }
+                        break :blk false;
+                    },
+                    else => break :blk false,
+                }
+            };
+
+            if (returns_primitive) {
+                // Regular primitive - just print it
+                if (arg_result.needs_try) {
+                    try buf.writer(self.temp_allocator).print("std.debug.print(\"{{}}\\n\", .{{try {s}}})", .{arg_result.code});
+                } else {
+                    try buf.writer(self.temp_allocator).print("std.debug.print(\"{{}}\\n\", .{{{s}}})", .{arg_result.code});
+                }
+            } else {
+                // Method call - returns PyObject
+                var print_buf = std.ArrayList(u8){};
+
+                // Generate unique temp var name
+                const temp_var = try std.fmt.allocPrint(self.allocator, "_print_tmp_{d}", .{@intFromPtr(arg_result.code.ptr)});
+
+                // Use 'try' if needed
+                const unwrap = if (arg_result.needs_try) "try " else "";
+
+                try print_buf.writer(self.temp_allocator).print(
+                    "{{ const {s} = {s}{s}; " ++
+                    "defer runtime.decref({s}, allocator); " ++
+                    "switch ({s}.type_id) {{ " ++
+                    ".int => std.debug.print(\"{{}}\\n\", .{{runtime.PyInt.getValue({s})}}), " ++
+                    ".string => std.debug.print(\"{{s}}\\n\", .{{runtime.PyString.getValue({s})}}), " ++
+                    ".list => {{ runtime.printList({s}); std.debug.print(\"\\n\", .{{}}); }}, " ++
+                    "else => std.debug.print(\"{{any}}\\n\", .{{{s}}}), " ++
+                    "}} }}",
+                    .{temp_var, unwrap, arg_result.code, temp_var, temp_var, temp_var, temp_var, temp_var, temp_var}
+                );
+                try self.emitOwned(try print_buf.toOwnedSlice(self.temp_allocator));
+                return ExprResult{
+                    .code = "",
+                    .needs_try = false,
+                };
+            }
         },
         else => {
             // For string constants, extract raw string and use directly (no PyObject needed)

@@ -154,9 +154,70 @@ fn visitAssign(self: *ZigCodeGenerator, assign: ast.Node.Assign) CodegenError!vo
                                 class_name = func_name.id;
                             }
                         },
-                        .attribute => {
-                            // Method call - result is a PyObject that needs special print handling
-                            try self.var_types.put(var_name, "pyobject");
+                        .attribute => |attr| {
+                            // Method call - determine return type based on method name
+                            const method_name = attr.attr;
+
+                            // String methods that return strings
+                            const string_methods = [_][]const u8{
+                                "upper", "lower", "strip", "lstrip", "rstrip",
+                                "replace", "capitalize", "title", "swapcase"
+                            };
+
+                            // List methods that return lists
+                            const list_methods = [_][]const u8{
+                                "copy", "reversed"
+                            };
+
+                            // Methods that return integers
+                            const int_methods = [_][]const u8{
+                                "count", "index", "find"
+                            };
+
+                            // Check if it's a string method
+                            var is_string_method = false;
+                            for (string_methods) |sm| {
+                                if (std.mem.eql(u8, method_name, sm)) {
+                                    is_string_method = true;
+                                    break;
+                                }
+                            }
+
+                            if (is_string_method) {
+                                try self.var_types.put(var_name, "string");
+                            } else {
+                                // Check if it's a list method
+                                var is_list_method = false;
+                                for (list_methods) |lm| {
+                                    if (std.mem.eql(u8, method_name, lm)) {
+                                        is_list_method = true;
+                                        break;
+                                    }
+                                }
+
+                                if (is_list_method) {
+                                    try self.var_types.put(var_name, "list");
+                                } else if (std.mem.eql(u8, method_name, "split")) {
+                                    // split() returns a list
+                                    try self.var_types.put(var_name, "list");
+                                } else {
+                                    // Check if it's an int method
+                                    var is_int_method = false;
+                                    for (int_methods) |im| {
+                                        if (std.mem.eql(u8, method_name, im)) {
+                                            is_int_method = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (is_int_method) {
+                                        try self.var_types.put(var_name, "int");
+                                    } else {
+                                        // Default to pyobject for unknown methods
+                                        try self.var_types.put(var_name, "pyobject");
+                                    }
+                                }
+                            }
                         },
                         else => {},
                     }

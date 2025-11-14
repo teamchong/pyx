@@ -31,6 +31,8 @@ pub fn visitExpr(self: *ZigCodeGenerator, node: ast.Node) CodegenError!ExprResul
 
         .list => |list| visitList(self, list),
 
+        .listcomp => |listcomp| visitListComp(self, listcomp),
+
         .dict => |dict| visitDict(self, dict),
 
         .tuple => |tuple| visitTuple(self, tuple),
@@ -202,6 +204,123 @@ fn visitList(self: *ZigCodeGenerator, list: ast.Node.List) CodegenError!ExprResu
     }
 
     // Return the list variable name
+    return ExprResult{
+        .code = list_var,
+        .needs_try = false,
+    };
+}
+
+/// Visit a list comprehension expression
+fn visitListComp(self: *ZigCodeGenerator, listcomp: ast.Node.ListComp) CodegenError!ExprResult {
+    // Generate code for list comprehension: [expr for var in iter if cond]
+    // Strategy: Create empty list, loop over iterator, append filtered results
+    self.needs_runtime = true;
+    self.needs_allocator = true;
+
+    // Unique variable name for the result list
+    const list_var = try std.fmt.allocPrint(self.allocator, "__listcomp_{d}", .{self.temp_var_counter});
+    self.temp_var_counter += 1;
+
+    // Create empty list
+    var create_buf = std.ArrayList(u8){};
+    try create_buf.writer(self.temp_allocator).print("const {s} = try runtime.PyList.create(allocator);", .{list_var});
+    try self.emitOwned(try create_buf.toOwnedSlice(self.temp_allocator));
+
+    // Get the iterator expression
+    const iter_result = try visitExpr(self, listcomp.iter.*);
+    const iter_code = if (iter_result.needs_try)
+        try std.fmt.allocPrint(self.allocator, "try {s}", .{iter_result.code})
+    else
+        iter_result.code;
+
+    // Get the loop variable name
+    const loop_var = switch (listcomp.target.*) {
+        .name => |name| name.id,
+        else => return error.InvalidLoopVariable,
+    };
+
+    // Cast PyObject to PyList to access items
+    const list_data_var = try std.fmt.allocPrint(self.allocator, "__list_data_{d}", .{self.temp_var_counter});
+    self.temp_var_counter += 1;
+
+    var cast_buf = std.ArrayList(u8){};
+    try cast_buf.writer(self.temp_allocator).print("const {s}: *runtime.PyList = @ptrCast(@alignCast({s}.data));", .{ list_data_var, iter_code });
+    try self.emitOwned(try cast_buf.toOwnedSlice(self.temp_allocator));
+
+    // Start for loop
+    var for_buf = std.ArrayList(u8){};
+    try for_buf.writer(self.temp_allocator).print("for ({s}.items.items) |{s}| {{", .{ list_data_var, loop_var });
+    try self.emitOwned(try for_buf.toOwnedSlice(self.temp_allocator));
+    self.indent();
+
+    // Mark loop variable as PyObject for proper type handling in expressions
+    try self.var_types.put(loop_var, "pyobject");
+
+    // If there are filter conditions, add if statement
+    if (listcomp.ifs.len > 0) {
+        var if_buf = std.ArrayList(u8){};
+        try if_buf.writer(self.temp_allocator).writeAll("if (");
+
+        // Combine all conditions with 'and'
+        for (listcomp.ifs, 0..) |cond, idx| {
+            if (idx > 0) {
+                try if_buf.writer(self.temp_allocator).writeAll(" and ");
+            }
+            const cond_result = try visitExpr(self, cond);
+            if (cond_result.needs_try) {
+                try if_buf.writer(self.temp_allocator).print("try {s}", .{cond_result.code});
+            } else {
+                try if_buf.writer(self.temp_allocator).writeAll(cond_result.code);
+            }
+        }
+
+        try if_buf.writer(self.temp_allocator).writeAll(") {");
+        try self.emitOwned(try if_buf.toOwnedSlice(self.temp_allocator));
+        self.indent();
+    }
+
+    // Evaluate element expression and append
+    const elt_result = try visitExpr(self, listcomp.elt.*);
+    var append_buf = std.ArrayList(u8){};
+
+    // Check if element needs wrapping
+    const needs_wrapping = switch (listcomp.elt.*) {
+        .constant => |c| switch (c.value) {
+            .int, .float, .bool => true,
+            else => false,
+        },
+        else => false,
+    };
+
+    if (needs_wrapping) {
+        const wrapped_code = switch (listcomp.elt.*) {
+            .constant => |c| switch (c.value) {
+                .int => try std.fmt.allocPrint(self.allocator, "try runtime.PyInt.create(allocator, {s})", .{elt_result.code}),
+                .float => try std.fmt.allocPrint(self.allocator, "try runtime.PyFloat.create(allocator, {s})", .{elt_result.code}),
+                .bool => try std.fmt.allocPrint(self.allocator, "try runtime.PyBool.create(allocator, {s})", .{elt_result.code}),
+                else => elt_result.code,
+            },
+            else => elt_result.code,
+        };
+        try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, {s});", .{ list_var, wrapped_code });
+    } else if (elt_result.needs_try) {
+        try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, try {s});", .{ list_var, elt_result.code });
+    } else {
+        try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, {s});", .{ list_var, elt_result.code });
+    }
+    try self.emitOwned(try append_buf.toOwnedSlice(self.temp_allocator));
+
+    // Close if block (if there are conditions)
+    if (listcomp.ifs.len > 0) {
+        self.dedent();
+        try self.emit("}");
+    }
+
+    // Close for loop
+    self.dedent();
+    try self.emit("}");
+
+    // Return the list variable
     return ExprResult{
         .code = list_var,
         .needs_try = false,

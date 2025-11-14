@@ -3,7 +3,7 @@ const std = @import("std");
 /// Async sleep (yields to event loop)
 pub fn sleep(seconds: f64) void {
     const nanos = @as(u64, @intFromFloat(seconds * 1_000_000_000));
-    std.time.sleep(nanos);
+    std.Thread.sleep(nanos);
 }
 
 /// Async sleep returning when done

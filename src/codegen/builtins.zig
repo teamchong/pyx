@@ -302,3 +302,31 @@ pub fn visitAnyCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Expr
         .needs_try = false,
     };
 }
+
+/// Handles Python's http_get() built-in
+/// Returns tuple of (status_code, body) as PyObject
+pub fn visitHttpGetCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!ExprResult {
+    if (args.len == 0) return error.MissingHttpGetArg;
+
+    // Enable HTTP and runtime modules
+    self.needs_http = true;
+    self.needs_runtime = true;
+
+    const arg = args[0];
+    const arg_result = try expressions.visitExpr(self,arg);
+
+    var buf = std.ArrayList(u8){};
+
+    // Extract URL string from PyObject if needed
+    // arg_result.code might be runtime.PyString.create() or a variable
+    // For now, assume it's a string that needs getValue
+    try buf.writer(self.temp_allocator).print(
+        "http.getAsResponse(allocator, runtime.PyString.getValue({s}))",
+        .{arg_result.code}
+    );
+
+    return ExprResult{
+        .code = try buf.toOwnedSlice(self.temp_allocator),
+        .needs_try = true, // HTTP can fail
+    };
+}

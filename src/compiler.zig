@@ -3,7 +3,7 @@ const std = @import("std");
 /// Compile Zig source code to native binary
 pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8) !void {
     // Copy runtime files to /tmp for import
-    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig" };
+    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig", "async.zig", "http.zig" };
     for (runtime_files) |file| {
         const src_path = try std.fmt.allocPrint(allocator, "packages/runtime/src/{s}", .{file});
         defer allocator.free(src_path);
@@ -70,7 +70,7 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
 /// Compile Zig source code to shared library (.so/.dylib)
 pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8) !void {
     // Copy runtime files to /tmp for import
-    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig" };
+    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig", "async.zig", "http.zig" };
     for (runtime_files) |file| {
         const src_path = try std.fmt.allocPrint(allocator, "packages/runtime/src/{s}", .{file});
         defer allocator.free(src_path);

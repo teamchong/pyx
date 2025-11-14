@@ -1,4 +1,4 @@
 | Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
 |:---|---:|---:|---:|---:|
-| `python benchmarks/fibonacci.py` | 804.5 ± 2.9 | 800.3 | 809.7 | 28.56 ± 0.89 |
-| `benchmarks/fibonacci_pyx` | 28.2 ± 0.9 | 26.8 | 30.9 | 1.00 |
+| `CPython` | 842.4 ± 107.0 | 800.6 | 1146.2 | 14.25 ± 1.82 |
+| `PyX` | 59.1 ± 0.8 | 57.7 | 61.4 | 1.00 |

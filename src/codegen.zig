@@ -29,6 +29,7 @@ pub const CodegenError = error{
     InvalidZipArgs,
     InvalidZipTarget,
     MissingLenArg,
+    MissingHttpGetArg,
     NotImplemented,
     OutOfMemory,
 };
@@ -75,6 +76,7 @@ pub const ZigCodeGenerator = struct {
 
     needs_runtime: bool,
     needs_allocator: bool,
+    needs_http: bool,
     has_async: bool,
     temp_var_counter: usize,
     is_shared_lib: bool, // Generate for shared library (.so) or binary
@@ -98,6 +100,7 @@ pub const ZigCodeGenerator = struct {
             .class_has_methods = std.StringHashMap(bool).init(allocator),
             .needs_runtime = false,
             .needs_allocator = false,
+            .needs_http = false,
             .has_async = false,
             .temp_var_counter = 0,
             .is_shared_lib = is_shared_lib,
@@ -260,6 +263,9 @@ pub const ZigCodeGenerator = struct {
         if (self.needs_runtime) {
             try self.emit("const runtime = @import(\"runtime.zig\");");
         }
+        if (self.needs_http) {
+            try self.emit("const http = @import(\"http.zig\");");
+        }
         try self.emit("");
 
         // Phase 3.5: Generate async executor if needed
@@ -412,6 +418,10 @@ pub const ZigCodeGenerator = struct {
                             std.mem.eql(u8, func_name.id, "any") or
                             std.mem.eql(u8, func_name.id, "len"))
                         {
+                            self.needs_runtime = true;
+                        }
+                        if (std.mem.eql(u8, func_name.id, "http_get")) {
+                            self.needs_http = true;
                             self.needs_runtime = true;
                         }
                     },

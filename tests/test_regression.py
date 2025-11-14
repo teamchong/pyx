@@ -15,6 +15,13 @@ from pathlib import Path
 PYX_ROOT = Path(__file__).parent.parent
 EXAMPLES_DIR = PYX_ROOT / "examples"
 
+# PyX-only examples that use built-ins not available in Python
+# These are compiled and run with PyX only (no Python comparison)
+PYX_ONLY_EXAMPLES = {
+    "web_crawler",
+    "web_crawler_async",
+}
+
 
 def get_all_examples():
     """Discover all .py files in examples directory"""
@@ -45,7 +52,7 @@ def run_example(example_path: Path) -> tuple[str, str, int, int]:
 
         # Compile PyX
         compile_result = subprocess.run(
-            ["pyx", "build", str(example_path), str(zy_bin)],
+            ["pyx", "build", "--binary", str(example_path), str(zy_bin)],
             capture_output=True,
             text=True,
             timeout=30,
@@ -81,6 +88,43 @@ class TestExamples:
     @pytest.mark.parametrize("name,path", get_all_examples())
     def test_example(self, name, path):
         """Test that example produces same output in Python and PyX"""
+        # PyX-only examples: just verify they compile and run without errors
+        if name in PYX_ONLY_EXAMPLES:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                zy_bin = Path(tmpdir) / "test_zy"
+
+                # Compile PyX
+                compile_result = subprocess.run(
+                    ["pyx", "build", "--binary", str(path), str(zy_bin)],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=PYX_ROOT
+                )
+
+                if compile_result.returncode != 0:
+                    pytest.fail(
+                        f"Compilation failed:\n"
+                        f"STDOUT:\n{compile_result.stdout}\n"
+                        f"STDERR:\n{compile_result.stderr}"
+                    )
+
+                # Run PyX (may fail due to network, but shouldn't crash)
+                zy_result = subprocess.run(
+                    [str(zy_bin)],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                # Just verify it exits (network errors are OK for web_crawler)
+                assert zy_result.returncode in [0, 1], (
+                    f"PyX crashed with exit code {zy_result.returncode}\n"
+                    f"STDERR:\n{zy_result.stderr}"
+                )
+            return
+
+        # Regular examples: compare Python vs PyX output
         py_out, zy_out, py_code, zy_code = run_example(path)
 
         # Both should exit successfully

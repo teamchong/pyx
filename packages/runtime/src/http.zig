@@ -11,7 +11,7 @@ pub const HttpResponse = struct {
     }
 };
 
-/// Async HTTP GET request using Zig 0.15.2 fetch API
+/// HTTP GET request using Zig 0.15.2 Client API
 pub fn get(allocator: std.mem.Allocator, url: []const u8) !HttpResponse {
     // Parse URL
     const uri = try std.Uri.parse(url);
@@ -20,19 +20,19 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) !HttpResponse {
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
 
-    // Response body buffer
+    // Create response buffer and writer
     var response_buf = std.ArrayList(u8){};
-    defer response_buf.deinit(allocator);
+    errdefer response_buf.deinit(allocator);
 
-    // Create writer for response
+    // Create proper Writer instance
     var buf_writer = response_buf.writer(allocator);
-    var any_writer = buf_writer.any();
+    var writer: std.io.Writer = buf_writer.writer();
 
-    // Execute fetch request
+    // Fetch request
     const result = try client.fetch(.{
         .location = .{ .uri = uri },
         .method = .GET,
-        .response_writer = &any_writer,
+        .response_writer = &writer,
     });
 
     return HttpResponse{

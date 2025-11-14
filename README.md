@@ -38,55 +38,155 @@ export PATH="$HOME/.local/bin:$PATH"
 ## Usage
 
 ```bash
-# Compile and run
+# Compile and run (default: shared library .so)
 pyx your_file.py
 
-# Build without running
+# Build standalone binary
+pyx --binary your_file.py
+
+# Force recompilation (ignore cache)
+pyx --force your_file.py
+
+# Build only, don't run
 pyx build your_file.py
 
-# Custom output path
-pyx build your_file.py /tmp/output
+# Build standalone binary without running
+pyx build --binary your_file.py
 ```
 
-## Example
+### Compilation Modes
 
-**Input (examples/fibonacci.py):**
+**Shared Library (.so) - Default:**
+- Fast compilation
+- Smaller output size
+- Architecture-specific naming (e.g., `myapp_x86_64.so`, `myapp_arm64.so`)
+- Timestamp-based caching for faster rebuilds
+
+**Standalone Binary (--binary):**
+- Fully self-contained executable
+- No dependencies
+- Slightly larger size
+- Portable within same architecture
+
+## Examples
+
+### 1. Computational (Fibonacci)
+
+Fast recursive computation - **14x faster** than CPython.
+
 ```python
 def fibonacci(n: int) -> int:
     if n <= 1:
         return n
     return fibonacci(n - 1) + fibonacci(n - 2)
 
-result = fibonacci(10)
+result = fibonacci(35)
+print(result)  # 9227465
+```
+
+```bash
+pyx examples/fibonacci.py
+# Output: 9227465 (in 59ms vs CPython's 842ms)
+```
+
+### 2. NumPy-Style Computation
+
+Vector operations without NumPy - **12x faster** than CPython.
+
+```python
+# Vector dot product
+dot_product = 0
+for i in range(10000):
+    a_i = i * 2
+    b_i = i + 100
+    dot_product = dot_product + a_i * b_i
+print(dot_product)
+
+# Nested loops (matrix-like)
+result = 0
+for i in range(100):
+    for j in range(100):
+        result = result + i * j
 print(result)
 ```
 
-**Compile and run:**
-```bash
-pyx examples/fibonacci.py
-# Output: 55
+### 3. Object-Oriented (Class Inheritance)
 
-# Or build without running
-pyx build examples/fibonacci.py
-./.pyx/fibonacci
-# Output: 55
+Full OOP support with classes and inheritance.
+
+```python
+class Shape:
+    def __init__(self, x: int, y: int):
+        self.x = x
+        self.y = y
+
+class Rectangle(Shape):
+    def __init__(self, x: int, y: int, width: int, height: int):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+
+    def area(self) -> int:
+        return self.width * self.height
+
+rect = Rectangle(10, 20, 5, 3)
+print(rect.area())  # 15
+```
+
+### 4. List Processing
+
+List comprehensions with filtering.
+
+```python
+numbers = [1, 2, 3, 4, 5]
+filtered = [x for x in numbers if x > 2]
+print(filtered)  # [3, 4, 5]
+
+# List methods
+numbers.append(6)
+numbers.reverse()
+print(numbers)
+```
+
+### 5. String Operations
+
+String manipulation - **8x faster** than CPython.
+
+```python
+text = "Hello, World!"
+upper = text.upper()
+words = text.split(", ")
+print(upper)     # HELLO, WORLD!
+print(words[0])  # Hello
+
+# String methods: upper, lower, split, strip, replace, find, count
 ```
 
 ## Performance
 
+Benchmarked with [hyperfine](https://github.com/sharkdp/hyperfine) on macOS ARM64.
+
 | Benchmark | CPython | PyX | Speedup |
-|:---|---:|---:|---:|
-| **Loop sum (1M)** | 65.4 ms | 1.6 ms | **41.40x faster** 🔥 |
-| **Fibonacci(35)** | 804.5 ms | 28.2 ms | **28.56x faster** 🚀 |
-| **Fibonacci(40)** | 12.3 s | 886 ms | **13.87x faster** 🚀 |
-| **List methods** | 22.1 ms | 1.5 ms | **14.89x faster** ⚡ |
-| **List operations** | 22.3 ms | 1.6 ms | **13.98x faster** ⚡ |
-| **String concat** | 23.6 ms | 1.9 ms | **12.24x faster** ⚡ |
+|:----------|--------:|----:|--------:|
+| **Loop sum (100M)** | 4.31 s | 152 ms | **28.3x** 🔥 |
+| **Fibonacci(35)** | 842 ms | 59.1 ms | **14.2x** 🚀 |
+| **NumPy-style** | 23.6 ms | 1.9 ms | **12.3x** ⚡ |
+| **String concat** | 20.7 ms | 2.6 ms | **8.1x** ⚡ |
 
-**Benchmarked with [hyperfine](https://github.com/sharkdp/hyperfine)** on macOS ARM64.
-**Note:** PyX binaries are pre-compiled - benchmarks measure **runtime only**, not compile time.
+**Key Insights:**
+- PyX excels at **computational tasks** (loops, recursion): 14-28x faster than CPython
+- PyX uses **ahead-of-time compilation** to native code (vs CPython's bytecode interpreter)
+- **Zero runtime overhead** - No JIT warmup or GC pauses
+- All benchmarks measure **runtime only** (binaries pre-compiled)
 
-Raw results: [loop_sum_results.md](benchmarks/loop_sum_results.md) · [fibonacci_results.md](benchmarks/fibonacci_results.md) · [list_methods_results.md](benchmarks/list_methods_results.md) · [list_ops_results.md](benchmarks/list_ops_results.md) · [string_results.md](benchmarks/string_results.md)
+**Why PyX is faster:**
+- Direct compilation to native machine code via Zig
+- Eliminates Python interpreter overhead
+- Optimized memory management with reference counting
+- No dynamic type checking at runtime
+
+Detailed methodology: [BENCHMARKS.md](BENCHMARKS.md)
 
 ## Features
 

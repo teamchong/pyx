@@ -1,4 +1,4 @@
-| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+| Command | Mean [s] | Min [s] | Max [s] | Relative |
 |:---|---:|---:|---:|---:|
-| `python benchmarks/loop_sum.py` | 65.4 ± 2.3 | 62.5 | 72.3 | 41.40 ± 13.96 |
-| `benchmarks/loop_sum_pyx` | 1.6 ± 0.5 | 0.7 | 5.7 | 1.00 |
+| `CPython` | 4.313 ± 0.226 | 4.066 | 4.797 | 28.33 ± 1.51 |
+| `PyX` | 0.152 ± 0.002 | 0.149 | 0.157 | 1.00 |

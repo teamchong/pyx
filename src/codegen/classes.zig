@@ -173,6 +173,12 @@ pub fn visitClassDef(self: *ZigCodeGenerator, class: ast.Node.ClassDef) CodegenE
 
         // Infer return type from method body
         const return_type = inferReturnType(method.body);
+
+        // Store method return type for later wrapping in visitMethodCall
+        // Key format: "ClassName.methodName" -> "i64" | "void"
+        const method_key = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{class.name, method.name});
+        try self.method_return_types.put(method_key, return_type);
+
         try buf.writer(self.temp_allocator).print(") {s} {{", .{return_type});
         try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
         self.indent();
@@ -297,7 +303,44 @@ pub fn visitMethodCall(self: *ZigCodeGenerator, attr: ast.Node.Attribute, args: 
             }
         }
         try buf.writer(self.temp_allocator).writeAll(")");
-        return ExprResult{ .code = try buf.toOwnedSlice(self.temp_allocator), .needs_try = false };
+
+        const method_call_code = try buf.toOwnedSlice(self.temp_allocator);
+
+        // Check if we need to wrap the return value (primitive -> PyObject)
+        // Get class name from var_type to look up method return type
+        const class_name = blk: {
+            switch (attr.value.*) {
+                .name => |obj_name| {
+                    if (self.var_types.get(obj_name.id)) |vt| {
+                        break :blk vt;
+                    }
+                },
+                else => {},
+            }
+            break :blk null;
+        };
+
+        if (class_name) |cname| {
+            const method_key = try std.fmt.allocPrint(self.temp_allocator, "{s}.{s}", .{cname, method_name});
+            if (self.method_return_types.get(method_key)) |return_type| {
+                if (std.mem.eql(u8, return_type, "i64")) {
+                    // Wrap i64 return in PyInt
+                    self.needs_runtime = true;
+                    self.needs_allocator = true;
+                    var wrap_buf = std.ArrayList(u8){};
+                    try wrap_buf.writer(self.temp_allocator).print("runtime.PyInt.create(allocator, {s})", .{method_call_code});
+                    return ExprResult{
+                        .code = try wrap_buf.toOwnedSlice(self.temp_allocator),
+                        .needs_try = true,
+                        .needs_decref = true,
+                    };
+                }
+                // void methods don't return values, return as-is
+                // Future: add f64, bool support
+            }
+        }
+
+        return ExprResult{ .code = method_call_code, .needs_try = false };
     }
 
     // String methods
@@ -515,6 +558,42 @@ pub fn visitMethodCall(self: *ZigCodeGenerator, attr: ast.Node.Attribute, args: 
         }
 
         try buf.writer(self.temp_allocator).writeAll(")");
-        return ExprResult{ .code = try buf.toOwnedSlice(self.temp_allocator), .needs_try = false };
+        const method_call_code = try buf.toOwnedSlice(self.temp_allocator);
+
+        // Check if we need to wrap the return value (primitive -> PyObject)
+        // Get class name from var_type to look up method return type
+        const class_name = blk: {
+            switch (attr.value.*) {
+                .name => |obj_name| {
+                    if (self.var_types.get(obj_name.id)) |vt| {
+                        break :blk vt;
+                    }
+                },
+                else => {},
+            }
+            break :blk null;
+        };
+
+        if (class_name) |cname| {
+            const method_key = try std.fmt.allocPrint(self.temp_allocator, "{s}.{s}", .{cname, method_name});
+            if (self.method_return_types.get(method_key)) |return_type| {
+                if (std.mem.eql(u8, return_type, "i64")) {
+                    // Wrap i64 return in PyInt
+                    self.needs_runtime = true;
+                    self.needs_allocator = true;
+                    var wrap_buf = std.ArrayList(u8){};
+                    try wrap_buf.writer(self.temp_allocator).print("runtime.PyInt.create(allocator, {s})", .{method_call_code});
+                    return ExprResult{
+                        .code = try wrap_buf.toOwnedSlice(self.temp_allocator),
+                        .needs_try = true,
+                        .needs_decref = true,
+                    };
+                }
+                // void methods don't return values, return as-is
+                // Future: add f64, bool support
+            }
+        }
+
+        return ExprResult{ .code = method_call_code, .needs_try = false };
     }
 }

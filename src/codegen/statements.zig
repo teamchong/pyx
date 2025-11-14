@@ -150,7 +150,8 @@ fn visitAssign(self: *ZigCodeGenerator, assign: ast.Node.Assign) CodegenError!vo
                     switch (call.func.*) {
                         .name => |func_name| {
                             if (self.class_names.contains(func_name.id)) {
-                                try self.var_types.put(var_name, "class");
+                                // Store the actual class name, not just "class"
+                                try self.var_types.put(var_name, func_name.id);
                                 is_class_instance = true;
                                 class_name = func_name.id;
                             }
@@ -405,10 +406,16 @@ fn visitAssign(self: *ZigCodeGenerator, assign: ast.Node.Assign) CodegenError!vo
                                 var buf = std.ArrayList(u8){};
                                 if (is_first_assignment) {
                                     try buf.writer(self.temp_allocator).print("{s} {s} = try runtime.PyTuple.getItem({s}, {d});", .{ var_keyword, var_name, value_result.code, i });
+                                    try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
+
+                                    // Add defer for PyObject
+                                    var defer_buf = std.ArrayList(u8){};
+                                    try defer_buf.writer(self.temp_allocator).print("defer runtime.decref({s}, allocator);", .{var_name});
+                                    try self.emitOwned(try defer_buf.toOwnedSlice(self.temp_allocator));
                                 } else {
                                     try buf.writer(self.temp_allocator).print("{s} = try runtime.PyTuple.getItem({s}, {d});", .{ var_name, value_result.code, i });
+                                    try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
                                 }
-                                try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
                             },
                             else => return error.UnsupportedTarget,
                         }

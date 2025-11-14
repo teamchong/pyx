@@ -2,10 +2,238 @@ const std = @import("std");
 const ast = @import("../ast.zig");
 const codegen = @import("../codegen.zig");
 const statements = @import("statements.zig");
+const expressions = @import("expressions.zig");
 
 const ZigCodeGenerator = codegen.ZigCodeGenerator;
 const ExprResult = codegen.ExprResult;
 const CodegenError = codegen.CodegenError;
+
+/// Infer parameter type by analyzing function body usage
+fn inferParamType(self: *ZigCodeGenerator, param_name: []const u8, body: []const ast.Node) []const u8 {
+    for (body) |node| {
+        const param_type = inferParamTypeInNode(self, param_name, node);
+        if (param_type) |t| return t;
+    }
+    return "i64"; // Default to i64
+}
+
+/// Recursively check node for parameter usage patterns
+fn inferParamTypeInNode(self: *ZigCodeGenerator, param_name: []const u8, node: ast.Node) ?[]const u8 {
+    switch (node) {
+        .binop => |binop| {
+            // Check if param is used in string concatenation
+            if (binop.op == .Add) {
+                if (isStringNode(self, binop.left.*) or isStringNode(self, binop.right.*)) {
+                    if (nodeReferencesName(binop.left.*, param_name) or nodeReferencesName(binop.right.*, param_name)) {
+                        return "*runtime.PyObject";
+                    }
+                }
+            }
+            // Recurse
+            if (inferParamTypeInNode(self, param_name, binop.left.*)) |t| return t;
+            if (inferParamTypeInNode(self, param_name, binop.right.*)) |t| return t;
+        },
+        .attribute => |attr| {
+            // If param has method calls (param.upper()), it's a PyObject
+            if (nodeReferencesName(attr.value.*, param_name)) {
+                return "*runtime.PyObject";
+            }
+        },
+        .call => |call| {
+            // Check if param is passed to a function expecting PyObject
+            for (call.args) |arg| {
+                if (inferParamTypeInNode(self, param_name, arg)) |t| return t;
+            }
+        },
+        .if_stmt => |if_stmt| {
+            for (if_stmt.body) |stmt| {
+                if (inferParamTypeInNode(self, param_name, stmt)) |t| return t;
+            }
+            for (if_stmt.else_body) |stmt| {
+                if (inferParamTypeInNode(self, param_name, stmt)) |t| return t;
+            }
+        },
+        .return_stmt => |ret| {
+            if (ret.value) |val| {
+                return inferParamTypeInNode(self, param_name, val.*);
+            }
+        },
+        else => {},
+    }
+    return null;
+}
+
+/// Check if a node represents a string value
+fn isStringNode(self: *ZigCodeGenerator, node: ast.Node) bool {
+    switch (node) {
+        .constant => |c| return c.value == .string,
+        .name => |name| {
+            if (self.var_types.get(name.id)) |var_type| {
+                return std.mem.eql(u8, var_type, "string");
+            }
+        },
+        else => {},
+    }
+    return false;
+}
+
+/// Check if node references a specific variable name
+fn nodeReferencesName(node: ast.Node, target_name: []const u8) bool {
+    switch (node) {
+        .name => |name| return std.mem.eql(u8, name.id, target_name),
+        .binop => |binop| {
+            return nodeReferencesName(binop.left.*, target_name) or
+                nodeReferencesName(binop.right.*, target_name);
+        },
+        .attribute => |attr| return nodeReferencesName(attr.value.*, target_name),
+        .call => |call| {
+            if (nodeReferencesName(call.func.*, target_name)) return true;
+            for (call.args) |arg| {
+                if (nodeReferencesName(arg, target_name)) return true;
+            }
+            return false;
+        },
+        else => {},
+    }
+    return false;
+}
+
+/// Infer return type by analyzing return statements
+fn inferReturnType(self: *ZigCodeGenerator, body: []const ast.Node) ![]const u8 {
+    for (body) |node| {
+        if (node == .return_stmt) {
+            if (node.return_stmt.value) |val| {
+                // Analyze the return value to determine type
+                switch (val.*) {
+                    .constant => |c| {
+                        switch (c.value) {
+                            .int => return "i64",
+                            .string => return "*runtime.PyObject",
+                            else => return "i64",
+                        }
+                    },
+                    .binop => |binop| {
+                        // String concatenation returns PyObject
+                        if (binop.op == .Add) {
+                            if (isStringNode(self, binop.left.*) or isStringNode(self, binop.right.*)) {
+                                return "*runtime.PyObject";
+                            }
+                        }
+                        return "i64";
+                    },
+                    .call => {
+                        // Recursive call - analyze other returns or default to i64
+                        return "i64";
+                    },
+                    else => return "i64",
+                }
+            }
+            return "void";
+        }
+        // Recursively check nested statements
+        const nested_type = inferReturnTypeInNode(self, node);
+        if (nested_type) |t| return t;
+    }
+    return "void";
+}
+
+/// Check for return statements in nested nodes
+fn inferReturnTypeInNode(self: *ZigCodeGenerator, node: ast.Node) ?[]const u8 {
+    switch (node) {
+        .if_stmt => |if_stmt| {
+            // Check body for return statements
+            for (if_stmt.body) |stmt| {
+                if (stmt == .return_stmt) {
+                    if (stmt.return_stmt.value) |val| {
+                        // Inline the type inference
+                        switch (val.*) {
+                            .constant => |c| {
+                                switch (c.value) {
+                                    .int => return "i64",
+                                    .string => return "*runtime.PyObject",
+                                    else => return "i64",
+                                }
+                            },
+                            .binop => |binop| {
+                                if (binop.op == .Add) {
+                                    if (isStringNode(self, binop.left.*) or isStringNode(self, binop.right.*)) {
+                                        return "*runtime.PyObject";
+                                    }
+                                }
+                                return "i64";
+                            },
+                            else => return "i64",
+                        }
+                    }
+                }
+            }
+            // Check else body
+            for (if_stmt.else_body) |stmt| {
+                if (stmt == .return_stmt) {
+                    if (stmt.return_stmt.value) |val| {
+                        switch (val.*) {
+                            .constant => |c| {
+                                switch (c.value) {
+                                    .int => return "i64",
+                                    .string => return "*runtime.PyObject",
+                                    else => return "i64",
+                                }
+                            },
+                            .binop => |binop| {
+                                if (binop.op == .Add) {
+                                    if (isStringNode(self, binop.left.*) or isStringNode(self, binop.right.*)) {
+                                        return "*runtime.PyObject";
+                                    }
+                                }
+                                return "i64";
+                            },
+                            else => return "i64",
+                        }
+                    }
+                }
+            }
+        },
+        else => {},
+    }
+    return null;
+}
+
+/// Check if function body needs allocator (uses runtime functions)
+fn needsAllocator(body: []const ast.Node) bool {
+    for (body) |node| {
+        if (nodeNeedsAllocator(node)) return true;
+    }
+    return false;
+}
+
+fn nodeNeedsAllocator(node: ast.Node) bool {
+    switch (node) {
+        .constant => |c| return c.value == .string,
+        .binop => |binop| {
+            return nodeNeedsAllocator(binop.left.*) or nodeNeedsAllocator(binop.right.*);
+        },
+        .call => |call| {
+            for (call.args) |arg| {
+                if (nodeNeedsAllocator(arg)) return true;
+            }
+            return false;
+        },
+        .if_stmt => |if_stmt| {
+            for (if_stmt.body) |stmt| {
+                if (nodeNeedsAllocator(stmt)) return true;
+            }
+            for (if_stmt.else_body) |stmt| {
+                if (nodeNeedsAllocator(stmt)) return true;
+            }
+            return false;
+        },
+        .return_stmt => |ret| {
+            if (ret.value) |val| return nodeNeedsAllocator(val.*);
+            return false;
+        },
+        else => return false,
+    }
+}
 
 /// Generate code for function definition
 pub fn visitFunctionDef(self: *ZigCodeGenerator, func: ast.Node.FunctionDef) CodegenError!void {
@@ -18,32 +246,49 @@ pub fn visitFunctionDef(self: *ZigCodeGenerator, func: ast.Node.FunctionDef) Cod
 
 /// Generate synchronous function
 fn emitSyncFunction(self: *ZigCodeGenerator, func: ast.Node.FunctionDef) CodegenError!void {
-    // For now, generate simple functions with i64 parameters and return type
-    // This handles common cases like fibonacci(n: int) -> int
+    // Infer return type from function body
+    const return_type = try inferReturnType(self, func.body);
+    const needs_try = std.mem.eql(u8, return_type, "*runtime.PyObject");
+
+    // Check if this function needs allocator
+    const func_needs_allocator = needsAllocator(func.body);
+
+    // Store function metadata for calls
+    try self.function_needs_allocator.put(func.name, func_needs_allocator);
+    try self.function_return_types.put(func.name, return_type);
 
     var buf = std.ArrayList(u8){};
 
     // Start function signature
-    try buf.writer(self.temp_allocator).print("fn {s}(", .{func.name});
+    if (needs_try) {
+        try buf.writer(self.temp_allocator).print("fn {s}(", .{func.name});
+    } else {
+        try buf.writer(self.temp_allocator).print("fn {s}(", .{func.name});
+    }
 
-    // Add parameters - assume i64 for now
+    // Add parameters with inferred types
     for (func.args, 0..) |arg, i| {
         if (i > 0) {
             try buf.writer(self.temp_allocator).writeAll(", ");
         }
-        try buf.writer(self.temp_allocator).print("{s}: i64", .{arg.name});
+        const param_type = inferParamType(self, arg.name, func.body);
+        try buf.writer(self.temp_allocator).print("{s}: {s}", .{ arg.name, param_type });
     }
 
     // Add allocator parameter if needed
-    if (self.needs_allocator) {
+    if (func_needs_allocator) {
         if (func.args.len > 0) {
             try buf.writer(self.temp_allocator).writeAll(", ");
         }
         try buf.writer(self.temp_allocator).writeAll("allocator: std.mem.Allocator");
     }
 
-    // Close signature - assume i64 return type for now
-    try buf.writer(self.temp_allocator).writeAll(") i64 {");
+    // Close signature with return type
+    if (needs_try) {
+        try buf.writer(self.temp_allocator).print(") !{s} {{", .{return_type});
+    } else {
+        try buf.writer(self.temp_allocator).print(") {s} {{", .{return_type});
+    }
 
     try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
     self.indent();
@@ -164,6 +409,11 @@ fn emitAsyncFunction(self: *ZigCodeGenerator, func: ast.Node.FunctionDef) Codege
 pub fn visitUserFunctionCall(self: *ZigCodeGenerator, func_name: []const u8, args: []ast.Node) CodegenError!ExprResult {
     var buf = std.ArrayList(u8){};
 
+    // Check if function needs allocator and return type
+    const func_needs_allocator = self.function_needs_allocator.get(func_name) orelse false;
+    const return_type = self.function_return_types.get(func_name) orelse "i64";
+    const needs_try = std.mem.eql(u8, return_type, "*runtime.PyObject");
+
     // Generate function call: func_name(arg1, arg2, ...)
     try buf.writer(self.temp_allocator).print("{s}(", .{func_name});
 
@@ -172,21 +422,27 @@ pub fn visitUserFunctionCall(self: *ZigCodeGenerator, func_name: []const u8, arg
         if (i > 0) {
             try buf.writer(self.temp_allocator).writeAll(", ");
         }
-        const arg_result = try self.visitExpr(arg);
-        try buf.writer(self.temp_allocator).writeAll(arg_result.code);
+        const arg_result = try expressions.visitExpr(self, arg);
+        if (arg_result.needs_try) {
+            try buf.writer(self.temp_allocator).print("try {s}", .{arg_result.code});
+        } else {
+            try buf.writer(self.temp_allocator).writeAll(arg_result.code);
+        }
     }
 
-    // Add allocator if needed
-    if (self.needs_allocator and args.len > 0) {
-        try buf.writer(self.temp_allocator).writeAll(", allocator");
-    } else if (self.needs_allocator) {
-        try buf.writer(self.temp_allocator).writeAll("allocator");
+    // Add allocator only if this specific function needs it
+    if (func_needs_allocator) {
+        if (args.len > 0) {
+            try buf.writer(self.temp_allocator).writeAll(", allocator");
+        } else {
+            try buf.writer(self.temp_allocator).writeAll("allocator");
+        }
     }
 
     try buf.writer(self.temp_allocator).writeAll(")");
 
     return ExprResult{
         .code = try buf.toOwnedSlice(self.temp_allocator),
-        .needs_try = false,
+        .needs_try = needs_try,
     };
 }

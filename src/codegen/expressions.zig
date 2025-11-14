@@ -6,6 +6,7 @@ const ZigCodeGenerator = @import("../codegen.zig").ZigCodeGenerator;
 const builtins = @import("builtins.zig");
 const operators = @import("operators.zig");
 const classes = @import("classes.zig");
+const functions = @import("functions.zig");
 
 /// Visit an expression node and generate code
 pub fn visitExpr(self: *ZigCodeGenerator, node: ast.Node) CodegenError!ExprResult {
@@ -629,7 +630,7 @@ pub fn visitCall(self: *ZigCodeGenerator, call: ast.Node.Call) CodegenError!Expr
 
                 // Check if this is a user-defined function
                 if (self.function_names.contains(func_name.id)) {
-                    return visitUserFunctionCall(self, func_name.id, call.args);
+                    return functions.visitUserFunctionCall(self, func_name.id, call.args);
                 }
                 return error.UnsupportedFunction;
             }
@@ -640,35 +641,4 @@ pub fn visitCall(self: *ZigCodeGenerator, call: ast.Node.Call) CodegenError!Expr
         },
         else => return error.UnsupportedCall,
     }
-}
-
-/// Visit a user-defined function call
-fn visitUserFunctionCall(self: *ZigCodeGenerator, func_name: []const u8, args: []ast.Node) CodegenError!ExprResult {
-    var buf = std.ArrayList(u8){};
-
-    // Generate function call: func_name(arg1, arg2, ...)
-    try buf.writer(self.temp_allocator).print("{s}(", .{func_name});
-
-    // Add arguments
-    for (args, 0..) |arg, i| {
-        if (i > 0) {
-            try buf.writer(self.temp_allocator).writeAll(", ");
-        }
-        const arg_result = try visitExpr(self, arg);
-        try buf.writer(self.temp_allocator).writeAll(arg_result.code);
-    }
-
-    // Add allocator if needed
-    if (self.needs_allocator and args.len > 0) {
-        try buf.writer(self.temp_allocator).writeAll(", allocator");
-    } else if (self.needs_allocator) {
-        try buf.writer(self.temp_allocator).writeAll("allocator");
-    }
-
-    try buf.writer(self.temp_allocator).writeAll(")");
-
-    return ExprResult{
-        .code = try buf.toOwnedSlice(self.temp_allocator),
-        .needs_try = false,
-    };
 }

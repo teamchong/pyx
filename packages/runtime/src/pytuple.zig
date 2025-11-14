@@ -57,7 +57,9 @@ pub const PyTuple = struct {
         if (idx >= data.items.len) {
             return PythonError.IndexError;
         }
-        return data.items[idx];
+        const item = data.items[idx];
+        incref(item);
+        return item;
     }
 
     pub fn len(obj: *PyObject) usize {

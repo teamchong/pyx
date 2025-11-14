@@ -71,8 +71,11 @@ pub const ZigCodeGenerator = struct {
     list_element_types: std.StringHashMap([]const u8),
     tuple_element_types: std.StringHashMap([]const u8),
     function_names: std.StringHashMap(void),
+    function_needs_allocator: std.StringHashMap(bool),
+    function_return_types: std.StringHashMap([]const u8),
     class_names: std.StringHashMap(void),
     class_has_methods: std.StringHashMap(bool),
+    method_return_types: std.StringHashMap([]const u8),
 
     needs_runtime: bool,
     needs_allocator: bool,
@@ -97,8 +100,11 @@ pub const ZigCodeGenerator = struct {
             .list_element_types = std.StringHashMap([]const u8).init(allocator),
             .tuple_element_types = std.StringHashMap([]const u8).init(allocator),
             .function_names = std.StringHashMap(void).init(allocator),
+            .function_needs_allocator = std.StringHashMap(bool).init(allocator),
+            .function_return_types = std.StringHashMap([]const u8).init(allocator),
             .class_names = std.StringHashMap(void).init(allocator),
             .class_has_methods = std.StringHashMap(bool).init(allocator),
+            .method_return_types = std.StringHashMap([]const u8).init(allocator),
             .needs_runtime = false,
             .needs_allocator = false,
             .needs_http = false,
@@ -120,8 +126,11 @@ pub const ZigCodeGenerator = struct {
         self.list_element_types.deinit();
         self.tuple_element_types.deinit();
         self.function_names.deinit();
+        self.function_needs_allocator.deinit();
+        self.function_return_types.deinit();
         self.class_names.deinit();
         self.class_has_methods.deinit();
+        self.method_return_types.deinit();
         self.arena.deinit(); // Free all temp allocations
         self.allocator.destroy(self);
     }
@@ -470,6 +479,18 @@ pub const ZigCodeGenerator = struct {
                             self.needs_http = true;
                             self.needs_runtime = true;
                         }
+                        // Check if this is a class method call wrapped in print()
+                        // Since we can't easily determine return type here, conservatively assume runtime needed
+                        if (self.class_names.contains(func_name.id)) {
+                            self.needs_runtime = true;
+                            self.needs_allocator = true;
+                        }
+                    },
+                    .attribute => {
+                        // Method calls might return primitives that need wrapping
+                        // Conservatively mark as needing runtime
+                        self.needs_runtime = true;
+                        self.needs_allocator = true;
                     },
                     else => {},
                 }

@@ -99,6 +99,12 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
             const returns_primitive = blk: {
                 switch (call.func.*) {
                     .name => |func_name| {
+                        // Check if it's a user-defined function
+                        if (self.function_return_types.get(func_name.id)) |return_type| {
+                            // User function - check if it returns i64 (primitive)
+                            break :blk std.mem.eql(u8, return_type, "i64");
+                        }
+
                         // Functions that return primitives, not PyObjects
                         const primitive_funcs = [_][]const u8{"len", "abs", "round", "min", "max", "sum"};
                         for (primitive_funcs) |pf| {

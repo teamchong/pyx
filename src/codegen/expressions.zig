@@ -282,7 +282,6 @@ fn visitListComp(self: *ZigCodeGenerator, listcomp: ast.Node.ListComp) CodegenEr
 
     // Evaluate element expression and append
     const elt_result = try visitExpr(self, listcomp.elt.*);
-    var append_buf = std.ArrayList(u8){};
 
     // Check if element needs wrapping
     const needs_wrapping = switch (listcomp.elt.*) {
@@ -290,10 +289,15 @@ fn visitListComp(self: *ZigCodeGenerator, listcomp: ast.Node.ListComp) CodegenEr
             .int, .float, .bool => true,
             else => false,
         },
+        .binop => true, // Binary operations on PyObjects produce primitives, need wrapping
         else => false,
     };
 
     if (needs_wrapping) {
+        // Create temp variable for wrapped value to properly manage refcount
+        const temp_var = try std.fmt.allocPrint(self.allocator, "__temp_{d}", .{self.temp_var_counter});
+        self.temp_var_counter += 1;
+
         const wrapped_code = switch (listcomp.elt.*) {
             .constant => |c| switch (c.value) {
                 .int => try std.fmt.allocPrint(self.allocator, "try runtime.PyInt.create(allocator, {s})", .{elt_result.code}),
@@ -301,15 +305,44 @@ fn visitListComp(self: *ZigCodeGenerator, listcomp: ast.Node.ListComp) CodegenEr
                 .bool => try std.fmt.allocPrint(self.allocator, "try runtime.PyBool.create(allocator, {s})", .{elt_result.code}),
                 else => elt_result.code,
             },
+            .binop => try std.fmt.allocPrint(self.allocator, "try runtime.PyInt.create(allocator, {s})", .{elt_result.code}),
             else => elt_result.code,
         };
-        try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, {s});", .{ list_var, wrapped_code });
-    } else if (elt_result.needs_try) {
-        try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, try {s});", .{ list_var, elt_result.code });
+
+        // Create temp var and append it (list takes ownership, no decref needed)
+        var temp_buf = std.ArrayList(u8){};
+        try temp_buf.writer(self.temp_allocator).print("const {s} = {s};", .{ temp_var, wrapped_code });
+        try self.emitOwned(try temp_buf.toOwnedSlice(self.temp_allocator));
+
+        var append_buf = std.ArrayList(u8){};
+        try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, {s});", .{ list_var, temp_var });
+        try self.emitOwned(try append_buf.toOwnedSlice(self.temp_allocator));
     } else {
-        try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, {s});", .{ list_var, elt_result.code });
+        // For PyObject elements (like loop variables), we need to incref before appending
+        // because both the source and destination list will own references
+        const is_pyobject = switch (listcomp.elt.*) {
+            .name => |name| blk: {
+                const var_type = self.var_types.get(name.id);
+                break :blk var_type != null and std.mem.eql(u8, var_type.?, "pyobject");
+            },
+            else => false,
+        };
+
+        if (is_pyobject) {
+            // Incref before appending (list takes ownership, so both lists will own it)
+            var incref_buf = std.ArrayList(u8){};
+            try incref_buf.writer(self.temp_allocator).print("runtime.incref({s});", .{elt_result.code});
+            try self.emitOwned(try incref_buf.toOwnedSlice(self.temp_allocator));
+        }
+
+        var append_buf = std.ArrayList(u8){};
+        if (elt_result.needs_try) {
+            try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, try {s});", .{ list_var, elt_result.code });
+        } else {
+            try append_buf.writer(self.temp_allocator).print("try runtime.PyList.append({s}, {s});", .{ list_var, elt_result.code });
+        }
+        try self.emitOwned(try append_buf.toOwnedSlice(self.temp_allocator));
     }
-    try self.emitOwned(try append_buf.toOwnedSlice(self.temp_allocator));
 
     // Close if block (if there are conditions)
     if (listcomp.ifs.len > 0) {

@@ -46,6 +46,27 @@ pub fn visitBinOp(self: *ZigCodeGenerator, binop: ast.Node.BinOp) CodegenError!E
 
     var buf = std.ArrayList(u8){};
 
+    // Check if operands are PyObjects (need unwrapping)
+    const is_left_pyobject = blk: {
+        switch (binop.left.*) {
+            .name => |name| {
+                const var_type = self.var_types.get(name.id);
+                break :blk var_type != null and std.mem.eql(u8, var_type.?, "pyobject");
+            },
+            else => break :blk false,
+        }
+    };
+
+    const is_right_pyobject = blk: {
+        switch (binop.right.*) {
+            .name => |name| {
+                const var_type = self.var_types.get(name.id);
+                break :blk var_type != null and std.mem.eql(u8, var_type.?, "pyobject");
+            },
+            else => break :blk false,
+        }
+    };
+
     // Check for string concatenation (string + string)
     if (binop.op == .Add) {
         const is_left_string = blk: {
@@ -89,20 +110,31 @@ pub fn visitBinOp(self: *ZigCodeGenerator, binop: ast.Node.BinOp) CodegenError!E
         }
     }
 
+    // Unwrap PyObject operands to get primitive values
+    const left_code = if (is_left_pyobject)
+        try std.fmt.allocPrint(self.allocator, "runtime.PyInt.getValue({s})", .{left_result.code})
+    else
+        left_result.code;
+
+    const right_code = if (is_right_pyobject)
+        try std.fmt.allocPrint(self.allocator, "runtime.PyInt.getValue({s})", .{right_result.code})
+    else
+        right_result.code;
+
     // Handle operators that need special Zig functions
     switch (binop.op) {
         .FloorDiv => {
             // Floor division: use @divFloor builtin
-            try buf.writer(self.temp_allocator).print("@divFloor({s}, {s})", .{ left_result.code, right_result.code });
+            try buf.writer(self.temp_allocator).print("@divFloor({s}, {s})", .{ left_code, right_code });
         },
         .Pow => {
             // Exponentiation: use std.math.pow
-            try buf.writer(self.temp_allocator).print("std.math.pow(i64, {s}, {s})", .{ left_result.code, right_result.code });
+            try buf.writer(self.temp_allocator).print("std.math.pow(i64, {s}, {s})", .{ left_code, right_code });
         },
         else => {
             // Standard operators that map directly to Zig operators
             const op_str = visitBinOpHelper(self, binop.op);
-            try buf.writer(self.temp_allocator).print("{s} {s} {s}", .{ left_result.code, op_str, right_result.code });
+            try buf.writer(self.temp_allocator).print("{s} {s} {s}", .{ left_code, op_str, right_code });
         },
     }
 

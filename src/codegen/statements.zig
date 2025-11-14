@@ -139,6 +139,9 @@ fn visitAssign(self: *ZigCodeGenerator, assign: ast.Node.Assign) CodegenError!vo
                 .list => {
                     try self.var_types.put(var_name, "list");
                 },
+                .listcomp => {
+                    try self.var_types.put(var_name, "list");
+                },
                 .dict => {
                     try self.var_types.put(var_name, "dict");
                 },
@@ -146,7 +149,7 @@ fn visitAssign(self: *ZigCodeGenerator, assign: ast.Node.Assign) CodegenError!vo
                     try self.var_types.put(var_name, "tuple");
                 },
                 .call => |call| {
-                    // Check if this is a class instantiation or method call
+                    // Check if this is a class instantiation, method call, or user function call
                     switch (call.func.*) {
                         .name => |func_name| {
                             if (self.class_names.contains(func_name.id)) {
@@ -154,6 +157,15 @@ fn visitAssign(self: *ZigCodeGenerator, assign: ast.Node.Assign) CodegenError!vo
                                 try self.var_types.put(var_name, func_name.id);
                                 is_class_instance = true;
                                 class_name = func_name.id;
+                            } else if (self.function_return_types.get(func_name.id)) |return_type| {
+                                // User-defined function - track return type
+                                if (std.mem.eql(u8, return_type, "*runtime.PyObject")) {
+                                    try self.var_types.put(var_name, "pyobject");
+                                } else if (std.mem.eql(u8, return_type, "i64")) {
+                                    try self.var_types.put(var_name, "int");
+                                } else if (std.mem.eql(u8, return_type, "void")) {
+                                    // void return - don't track type
+                                }
                             }
                         },
                         .attribute => |attr| {

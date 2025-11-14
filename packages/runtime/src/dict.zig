@@ -30,7 +30,11 @@ pub const PyDict = struct {
     pub fn get(obj: *runtime.PyObject, key: []const u8) ?*runtime.PyObject {
         std.debug.assert(obj.type_id == .dict);
         const data: *PyDict = @ptrCast(@alignCast(obj.data));
-        return data.map.get(key);
+        if (data.map.get(key)) |value| {
+            runtime.incref(value); // Incref before returning - caller owns reference
+            return value;
+        }
+        return null;
     }
 
     pub fn contains(obj: *runtime.PyObject, key: []const u8) bool {

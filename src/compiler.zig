@@ -3,7 +3,7 @@ const std = @import("std");
 /// Compile Zig source code to native binary
 pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8) !void {
     // Copy runtime files to /tmp for import
-    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig", "async.zig", "http.zig", "python.zig", "json.zig" };
+    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig", "async.zig", "http.zig", "json.zig" };
     for (runtime_files) |file| {
         const src_path = try std.fmt.allocPrint(allocator, "packages/runtime/src/{s}", .{file});
         defer allocator.free(src_path);
@@ -51,12 +51,6 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
     const i_flag = try std.fmt.allocPrint(allocator, "-I{s}", .{runtime_path});
     defer allocator.free(i_flag);
 
-    // Get Python paths if needed
-    const python_info = try getPythonPaths(allocator);
-    defer if (python_info.lib_dir) |p| allocator.free(p);
-    defer if (python_info.lib_name) |p| allocator.free(p);
-    defer if (python_info.include_dir) |p| allocator.free(p);
-
     // Build argument list
     var args = std.ArrayList([]const u8){};
     defer args.deinit(allocator);
@@ -75,26 +69,6 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
     try args.append(allocator, tmp_path);
     try args.append(allocator, i_flag);
     try args.append(allocator, "-ODebug");
-
-    // Add Python include path
-    if (python_info.include_dir) |inc_dir| {
-        const inc_flag = try std.fmt.allocPrint(allocator, "-I{s}", .{inc_dir});
-        try allocated_flags.append(allocator, inc_flag);
-        try args.append(allocator, inc_flag);
-    }
-
-    if (python_info.lib_dir) |lib_dir| {
-        const lib_path_flag = try std.fmt.allocPrint(allocator, "-L{s}", .{lib_dir});
-        try allocated_flags.append(allocator, lib_path_flag);
-        try args.append(allocator, lib_path_flag);
-    }
-
-    if (python_info.lib_name) |lib_name| {
-        const lib_flag = try std.fmt.allocPrint(allocator, "-l{s}", .{lib_name});
-        try allocated_flags.append(allocator, lib_flag);
-        try args.append(allocator, lib_flag);
-    }
-
     try args.append(allocator, "-lc");
     try args.append(allocator, output_flag);
 
@@ -118,7 +92,7 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
 /// Compile Zig source code to shared library (.so/.dylib)
 pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8) !void {
     // Copy runtime files to /tmp for import
-    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig", "async.zig", "http.zig", "python.zig", "json.zig" };
+    const runtime_files = [_][]const u8{ "runtime.zig", "pystring.zig", "pylist.zig", "dict.zig", "pyint.zig", "pytuple.zig", "async.zig", "http.zig", "json.zig" };
     for (runtime_files) |file| {
         const src_path = try std.fmt.allocPrint(allocator, "packages/runtime/src/{s}", .{file});
         defer allocator.free(src_path);
@@ -164,12 +138,6 @@ pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, o
     const i_flag = try std.fmt.allocPrint(allocator, "-I{s}", .{runtime_path});
     defer allocator.free(i_flag);
 
-    // Get Python paths if needed
-    const python_info = try getPythonPaths(allocator);
-    defer if (python_info.lib_dir) |p| allocator.free(p);
-    defer if (python_info.lib_name) |p| allocator.free(p);
-    defer if (python_info.include_dir) |p| allocator.free(p);
-
     // Build argument list
     var args = std.ArrayList([]const u8){};
     defer args.deinit(allocator);
@@ -189,26 +157,6 @@ pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, o
     try args.append(allocator, i_flag);
     try args.append(allocator, "-ODebug");
     try args.append(allocator, "-dynamic");
-
-    // Add Python include path
-    if (python_info.include_dir) |inc_dir| {
-        const inc_flag = try std.fmt.allocPrint(allocator, "-I{s}", .{inc_dir});
-        try allocated_flags.append(allocator, inc_flag);
-        try args.append(allocator, inc_flag);
-    }
-
-    if (python_info.lib_dir) |lib_dir| {
-        const lib_path_flag = try std.fmt.allocPrint(allocator, "-L{s}", .{lib_dir});
-        try allocated_flags.append(allocator, lib_path_flag);
-        try args.append(allocator, lib_path_flag);
-    }
-
-    if (python_info.lib_name) |lib_name| {
-        const lib_flag = try std.fmt.allocPrint(allocator, "-l{s}", .{lib_name});
-        try allocated_flags.append(allocator, lib_flag);
-        try args.append(allocator, lib_flag);
-    }
-
     try args.append(allocator, "-lc");
     try args.append(allocator, output_flag);
 
@@ -248,62 +196,6 @@ fn findZigBinary(allocator: std.mem.Allocator) ![]const u8 {
     }
 
     return try allocator.dupe(u8, "zig");
-}
-
-const PythonInfo = struct {
-    lib_dir: ?[]const u8,
-    lib_name: ?[]const u8,
-    include_dir: ?[]const u8,
-};
-
-/// Get Python library paths by calling python3-config
-fn getPythonPaths(allocator: std.mem.Allocator) !PythonInfo {
-    // Try to get library directory
-    const libdir_result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &[_][]const u8{ "python3", "-c", "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))" },
-    }) catch {
-        return PythonInfo{ .lib_dir = null, .lib_name = null, .include_dir = null };
-    };
-    defer allocator.free(libdir_result.stdout);
-    defer allocator.free(libdir_result.stderr);
-
-    const lib_dir = if (libdir_result.term.Exited == 0)
-        try allocator.dupe(u8, std.mem.trim(u8, libdir_result.stdout, " \n\r\t"))
-    else
-        null;
-
-    // Try to get library name (e.g., python3.12)
-    const libname_result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &[_][]const u8{ "python3", "-c", "import sysconfig; print('python' + sysconfig.get_config_var('py_version_short'))" },
-    }) catch {
-        return PythonInfo{ .lib_dir = lib_dir, .lib_name = null, .include_dir = null };
-    };
-    defer allocator.free(libname_result.stdout);
-    defer allocator.free(libname_result.stderr);
-
-    const lib_name = if (libname_result.term.Exited == 0)
-        try allocator.dupe(u8, std.mem.trim(u8, libname_result.stdout, " \n\r\t"))
-    else
-        null;
-
-    // Try to get include directory
-    const incdir_result = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &[_][]const u8{ "python3", "-c", "import sysconfig; print(sysconfig.get_path('include'))" },
-    }) catch {
-        return PythonInfo{ .lib_dir = lib_dir, .lib_name = lib_name, .include_dir = null };
-    };
-    defer allocator.free(incdir_result.stdout);
-    defer allocator.free(incdir_result.stderr);
-
-    const include_dir = if (incdir_result.term.Exited == 0)
-        try allocator.dupe(u8, std.mem.trim(u8, incdir_result.stdout, " \n\r\t"))
-    else
-        null;
-
-    return PythonInfo{ .lib_dir = lib_dir, .lib_name = lib_name, .include_dir = include_dir };
 }
 
 /// Copy a runtime subdirectory recursively to /tmp

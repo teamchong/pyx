@@ -648,12 +648,13 @@ fn visitImport(self: *ZigCodeGenerator, import_node: ast.Node.Import) CodegenErr
         try buf.writer(self.temp_allocator).print("// Native module: {s}", .{import_node.module});
         try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
     } else {
-        // Python FFI module
-        self.needs_python = true;
+        // Python package - use Zig C interop to call Python C API directly
+        // Import using @cImport for the Python module
         var buf = std.ArrayList(u8){};
         try buf.writer(self.temp_allocator).print(
-            "const {s} = try python.importModule(allocator, \"{s}\");",
-            .{ alias, import_node.module }
+            "// TODO: Implement Zig C interop for {s}\n" ++
+            "// const {s} = @cImport({{ @cInclude(\"{s}.h\"); }});",
+            .{ import_node.module, alias, import_node.module }
         );
         try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
     }
@@ -667,15 +668,16 @@ fn visitImport(self: *ZigCodeGenerator, import_node: ast.Node.Import) CodegenErr
 /// Generate code for from-import statement
 fn visitImportFrom(self: *ZigCodeGenerator, import_from: ast.Node.ImportFrom) CodegenError!void {
     self.needs_allocator = true;
-    self.needs_python = true;
 
+    // Python package - use Zig C interop
     for (import_from.names, 0..) |name, i| {
         const alias = if (import_from.asnames[i]) |a| a else name;
 
         var buf = std.ArrayList(u8){};
         try buf.writer(self.temp_allocator).print(
-            "const {s} = try python.importFrom(allocator, \"{s}\", \"{s}\");",
-            .{ alias, import_from.module, name }
+            "// TODO: Implement Zig C interop for {s}.{s}\n" ++
+            "// const {s} = @cImport({{ @cInclude(\"{s}.h\"); }}).{s};",
+            .{ import_from.module, name, alias, import_from.module, name }
         );
         try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
     }

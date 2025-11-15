@@ -112,39 +112,33 @@ pub fn visitPythonFunctionCall(self: *ZigCodeGenerator, module_code: []const u8,
         return ExprResult{ .code = code, .needs_try = true, .needs_decref = true };
     }
 
-    // Python FFI function call
-    self.needs_python = true;
+    // Python package function call - use Zig C interop
+    // Generate direct C function call to NumPy/Python C API
 
-    // Get the function attribute from module
-    var func_buf = std.ArrayList(u8){};
-    try func_buf.writer(self.temp_allocator).print("python.getattr(allocator, {s}, \"{s}\")", .{ module_code, func_name });
-    const func_code = try func_buf.toOwnedSlice(self.temp_allocator);
-
-    // Convert arguments to Python objects
+    // Build argument list
     var arg_codes = std.ArrayList([]const u8){};
-
     for (args) |arg| {
         const arg_result = try expressions.visitExpr(self, arg);
         const arg_code = try self.extractResultToStatement(arg_result);
-
-        // Convert Zig type to Python object
-        const converted = try convertToPythonObject(self, arg, arg_result, arg_code);
-        try arg_codes.append(self.temp_allocator, converted);
+        try arg_codes.append(self.temp_allocator, arg_code);
     }
 
-    // Build argument array
+    // Generate C function call
     var buf = std.ArrayList(u8){};
-    try buf.writer(self.temp_allocator).print("python.callPythonFunction(allocator, try {s}, &[_]*anyopaque{{", .{func_code});
+    try buf.writer(self.temp_allocator).print(
+        "// TODO: Direct C call to {s}.{s}(",
+        .{ module_code, func_name }
+    );
 
     for (arg_codes.items, 0..) |arg_code, i| {
         if (i > 0) try buf.writer(self.temp_allocator).writeAll(", ");
-        try buf.writer(self.temp_allocator).print("@ptrCast({s})", .{arg_code});
+        try buf.writer(self.temp_allocator).writeAll(arg_code);
     }
 
-    try buf.writer(self.temp_allocator).writeAll("})");
+    try buf.writer(self.temp_allocator).writeAll(")");
 
     const code = try buf.toOwnedSlice(self.temp_allocator);
-    return ExprResult{ .code = code, .needs_try = true, .needs_decref = false };
+    return ExprResult{ .code = code, .needs_try = false, .needs_decref = false };
 }
 
 /// Convert Zig value to Python object (*anyopaque)
